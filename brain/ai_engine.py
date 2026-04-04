@@ -3,7 +3,7 @@ from __future__ import annotations
 """AI engine using Ollama as a fallback command interpreter."""
 
 import json
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
 
 import requests
 
@@ -66,10 +66,37 @@ def _validate_steps(data: Dict[str, Any]) -> Dict[str, Any]:
     return {"steps": cleaned, "type": "ai"}
 
 
-def interpret_command(user_input: str) -> Dict[str, Any]:
+def _format_history(history: Iterable[Dict[str, Any]] | None) -> str:
+    if not history:
+        return "None."
+
+    lines = []
+    for item in history:
+        user_input = item.get("user_input", "")
+        steps = item.get("steps", []) or []
+        step_descriptions = []
+        for step in steps:
+            action = step.get("action") or step.get("status") or "unknown"
+            target = step.get("target") or step.get("output") or ""
+            if target:
+                step_descriptions.append(f"{action}: {target}")
+            else:
+                step_descriptions.append(f"{action}")
+        result = item.get("result", {})
+        res_status = result.get("status") or result.get("type") or ""
+        res_output = result.get("output") or result.get("message") or ""
+        summary = "; ".join(step_descriptions) if step_descriptions else "no steps"
+        result_summary = f"{res_status} {res_output}".strip()
+        lines.append(f"- Input: {user_input} | Steps: {summary} | Result: {result_summary}")
+
+    return "\n".join(lines)
+
+
+def interpret_command(user_input: str, history: Iterable[Dict[str, Any]] | None = None) -> Dict[str, Any]:
+    history_text = _format_history(history)
     payload = {
         "model": MODEL,
-        "prompt": f"{SYSTEM_PROMPT}\nUser: {user_input}\nAssistant:",
+        "prompt": f"{SYSTEM_PROMPT}\nUser history:\n{history_text}\n\nUser: {user_input}\nAssistant:",
         "stream": False,
     }
     try:
