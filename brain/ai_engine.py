@@ -12,7 +12,7 @@ MODEL = "llama3"
 
 SYSTEM_PROMPT = """
 You are Jarvis AI.
-Convert user input into a JSON list of steps. You may refer to previous outputs in next steps.
+Convert user input into a JSON list of steps. You may refer to previous outputs in next steps. Relevant past actions may be provided to help you plan.
 
 Available actions:
 * open_app
@@ -92,11 +92,34 @@ def _format_history(history: Iterable[Dict[str, Any]] | None) -> str:
     return "\n".join(lines)
 
 
-def interpret_command(user_input: str, history: Iterable[Dict[str, Any]] | None = None) -> Dict[str, Any]:
+def _format_relevant(relevant: Iterable[Dict[str, Any]] | None) -> str:
+    if not relevant:
+        return "None."
+    lines = []
+    for item in relevant:
+        user_input = item.get("user_input", "")
+        steps = item.get("steps", []) or []
+        step_descriptions = []
+        for step in steps:
+            action = step.get("action") or "unknown"
+            target = step.get("target") or step.get("output") or ""
+            if target:
+                step_descriptions.append(f"{action}: {target}")
+            else:
+                step_descriptions.append(f"{action}")
+        summary = "; ".join(step_descriptions) if step_descriptions else "no steps"
+        lines.append(f"- Input: {user_input} | Steps: {summary}")
+    return "\n".join(lines)
+
+
+def interpret_command(
+    user_input: str, history: Iterable[Dict[str, Any]] | None = None, relevant: Iterable[Dict[str, Any]] | None = None
+) -> Dict[str, Any]:
     history_text = _format_history(history)
+    relevant_text = _format_relevant(relevant)
     payload = {
         "model": MODEL,
-        "prompt": f"{SYSTEM_PROMPT}\nUser history:\n{history_text}\n\nUser: {user_input}\nAssistant:",
+        "prompt": f"{SYSTEM_PROMPT}\nUser history:\n{history_text}\n\nRelevant past actions:\n{relevant_text}\n\nUser: {user_input}\nAssistant:",
         "stream": False,
     }
     try:
