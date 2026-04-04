@@ -6,6 +6,7 @@ import re
 from typing import Dict
 
 from core.command_spec import COMMAND_SPEC
+from core.network_spec import NETWORK_SPEC
 
 _STOP_WORDS = ("please", "jarvis", "hey jarvis")
 _PLACEHOLDER_FIELDS = ("path", "name", "src", "dest", "new_name", "root_path")
@@ -99,6 +100,24 @@ def _match_file_command(normalized: str) -> Dict[str, str] | None:
     return None
 
 
+def _build_network_command(action: str, groups: Dict[str, str], cmd_type: str) -> Dict[str, str]:
+    cleaned = {k: _clean(v) for k, v in groups.items()}
+    target = cleaned.get("url") or cleaned.get("path") or ""
+    return {"action": action, "target": target, "extra": cleaned, "type": cmd_type, "message": "Processing network request"}
+
+
+def _match_network_command(normalized: str) -> Dict[str, str] | None:
+    for spec in NETWORK_SPEC:
+        action = spec.get("action", "")
+        cmd_type = spec.get("type", "network")
+        for phrase in spec.get("phrases", []):
+            regex = _phrase_to_regex(phrase)
+            match = regex.match(normalized)
+            if match:
+                return _build_network_command(action, match.groupdict(), cmd_type)
+    return None
+
+
 def route_command(text: str) -> Dict[str, str]:
     """Return a structured action dict for the given text command."""
     normalized = _normalize(text)
@@ -109,6 +128,10 @@ def route_command(text: str) -> Dict[str, str]:
     file_cmd = _match_file_command(normalized)
     if file_cmd:
         return file_cmd
+
+    net_cmd = _match_network_command(normalized)
+    if net_cmd:
+        return net_cmd
 
     # YouTube open variants
     if any(normalized.startswith(prefix) for prefix in ("open youtube", "launch youtube", "start youtube")) or "youtube.com" in normalized:
