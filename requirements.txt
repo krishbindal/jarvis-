@@ -2,3 +2,5 @@ PySide6>=6.6
 sounddevice>=0.4
 numpy>=1.26
 pygame>=2.5
+requests>=2.31
+yt-dlp>=2024.3.10
