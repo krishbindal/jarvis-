@@ -3,12 +3,23 @@ from __future__ import annotations
 """Rule-based command router for system and file commands."""
 
 import re
+from pathlib import Path
 from typing import Dict
 
 from core.command_spec import COMMAND_SPEC
 from core.network_spec import NETWORK_SPEC
 
-_STOP_WORDS = ("please", "jarvis", "hey jarvis")
+
+_STOP_WORDS = ("please", "jarvis", "hey jarvis", "okay jarvis", "ok jarvis")
+
+# Filler phrases that should be stripped before routing
+_FILLER_PHRASES = (
+    "can you ", "could you ", "would you ", "will you ",
+    "i want you to ", "i need you to ", "i'd like you to ",
+    "please ", "now ", "just ", "go ahead and ",
+    "for me ", "kindly ", "try to ",
+)
+
 _PLACEHOLDER_FIELDS = ("path", "name", "src", "dest", "new_name", "root_path")
 
 
@@ -16,6 +27,11 @@ def _normalize(text: str) -> str:
     cleaned = text.strip().lower()
     for word in _STOP_WORDS:
         cleaned = cleaned.replace(word, "")
+    # Strip leading filler phrases (e.g. "can you open youtube" -> "open youtube")
+    for filler in _FILLER_PHRASES:
+        if cleaned.startswith(filler):
+            cleaned = cleaned[len(filler):]
+            break
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
 
@@ -128,6 +144,30 @@ def route_command(text: str) -> Dict[str, str]:
 
     if not normalized:
         return _build("noop", "", "Empty command.")
+
+    # ── Conversational / greeting handler ─────────────────────────────────
+    _GREETINGS = ("hi", "hello", "hey", "what's up", "whats up", "sup",
+                  "good morning", "good evening", "good afternoon",
+                  "how are you", "how r u", "how are u", "you there",
+                  "are you there", "wake up", "jarvis wake up")
+    if normalized in _GREETINGS or any(normalized.startswith(g) for g in _GREETINGS):
+        return _build("chat", normalized, "Hi! I'm Jarvis, your Dexter Copilot. How can I help you?")
+
+    # ── Navigation: 'go to <folder>', 'take me to <folder>' ───────────────
+    nav_match = re.match(r"^(?:go to|take me to|navigate to|open my)\s+(.+)$", normalized)
+    if nav_match:
+        target = nav_match.group(1).strip()
+        # Map common spoken names to real paths
+        _FOLDER_MAP = {
+            "downloads": str(Path("~").expanduser() / "Downloads"),
+            "desktop":   str(Path("~").expanduser() / "Desktop"),
+            "documents": str(Path("~").expanduser() / "Documents"),
+            "pictures":  str(Path("~").expanduser() / "Pictures"),
+            "music":     str(Path("~").expanduser() / "Music"),
+            "videos":    str(Path("~").expanduser() / "Videos"),
+        }
+        real_path = _FOLDER_MAP.get(target, target)
+        return _build("open_folder", real_path, f"Opening {target}")
 
     file_cmd = _match_file_command(normalized)
     if file_cmd:
