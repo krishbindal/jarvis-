@@ -11,6 +11,7 @@ from core.startup import start_startup_sequence
 from executor.download_executor import download_file, download_video
 from executor.conversion_executor import execute_conversion
 from executor.system_executor import execute_file_command
+from executor.n8n_executor import trigger_workflow
 from memory.memory_store import get_recent_history, get_relevant_context, save_interaction
 from triggers.clap_detector import ClapDetector
 from ui.application import launch_ui
@@ -155,6 +156,19 @@ class JarvisApp:
                         "message": exec_result.get("message"),
                     }
                 ]
+            elif result.get("type") == "n8n":
+                exec_result = trigger_workflow(result.get("target", ""), result.get("extra", {}))
+                result["exec_result"] = exec_result
+                result["message"] = exec_result.get("message", result.get("message", ""))
+                interaction_steps = [
+                    {
+                        "action": result.get("action", ""),
+                        "target": result.get("target", ""),
+                        "status": exec_result.get("status"),
+                        "output": exec_result.get("output"),
+                        "message": exec_result.get("message"),
+                    }
+                ]
             self._events.emit("command_result", result)
             final_result = result
         except Exception as exc:  # noqa: BLE001
@@ -189,6 +203,11 @@ class JarvisApp:
             "file_info",
         ):
             return execute_file_command(action, target, extra)
+        if action == "trigger_n8n":
+            data = dict(extra or {})
+            if previous_result and "previous_output" not in data:
+                data["previous_output"] = previous_result.get("output", previous_result)
+            return trigger_workflow(target or action, data)
         return {"success": False, "message": f"Unsupported action: {action}"}
 
     def _shutdown(self) -> None:

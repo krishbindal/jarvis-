@@ -29,6 +29,7 @@ Available actions:
 * download_video
 * convert_to_mp3
 * convert_to_pdf
+* trigger_n8n
 
 Respond ONLY in JSON:
 {

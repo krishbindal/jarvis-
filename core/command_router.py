@@ -118,6 +118,10 @@ def _match_network_command(normalized: str) -> Dict[str, str] | None:
     return None
 
 
+def _build_n8n_command(target: str) -> Dict[str, str]:
+    return {"action": "trigger_n8n", "target": target, "extra": {}, "type": "n8n", "message": f"Running workflow {target}"}
+
+
 def route_command(text: str) -> Dict[str, str]:
     """Return a structured action dict for the given text command."""
     normalized = _normalize(text)
@@ -132,6 +136,18 @@ def route_command(text: str) -> Dict[str, str]:
     net_cmd = _match_network_command(normalized)
     if net_cmd:
         return net_cmd
+
+    if normalized.startswith("send to telegram"):
+        return _build_n8n_command("send_to_telegram")
+
+    if normalized.startswith("backup files") or normalized.startswith("backup file"):
+        return _build_n8n_command("backup_files")
+
+    workflow_match = re.match(r"^run workflow\s+(.+)$", normalized)
+    if workflow_match:
+        wf_name = workflow_match.group(1).strip()
+        if wf_name:
+            return _build_n8n_command(wf_name)
 
     # YouTube open variants
     if any(normalized.startswith(prefix) for prefix in ("open youtube", "launch youtube", "start youtube")) or "youtube.com" in normalized:
