@@ -27,7 +27,7 @@ def download_file(url: str) -> Dict:
     try:
         logger.info("Downloading file: %s", url)
         path = _save_path_from_url(url)
-        with requests.get(url, stream=True, timeout=30) as resp:
+        with requests.get(url, stream=True, timeout=10) as resp:
             resp.raise_for_status()
             with path.open("wb") as fh:
                 for chunk in resp.iter_content(chunk_size=8192):
@@ -40,6 +40,9 @@ def download_file(url: str) -> Dict:
             "path": str(path),
             "output": str(path),
         }
+    except requests.Timeout:
+        logger.error("Download timed out for %s", url)
+        return {"success": False, "status": "error", "output": "Request timed out", "message": "Request timed out"}
     except Exception as exc:  # noqa: BLE001
         logger.error("Download failed for %s: %s", url, exc)
         return {"success": False, "status": "error", "message": f"Download failed: {exc}"}

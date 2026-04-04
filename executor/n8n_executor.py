@@ -28,6 +28,14 @@ def trigger_workflow(action: str, data: Dict[str, Any] | None = None) -> Dict[st
             "message": f"Triggered n8n workflow '{action}'",
             "output": body or resp.text,
         }
+    except requests.Timeout:
+        logger.error("n8n workflow trigger timed out for %s", action)
+        return {
+            "success": False,
+            "status": "error",
+            "output": "Request timed out",
+            "message": "Request timed out",
+        }
     except Exception as exc:  # noqa: BLE001
         logger.error("n8n workflow trigger failed for %s: %s", action, exc)
         return {
