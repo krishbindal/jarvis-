@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+"""Thread-safe, lightweight event bus."""
+
 import threading
 from collections import defaultdict
-from typing import Callable, DefaultDict, Dict, List
+from typing import Callable, DefaultDict, List
 
 EventHandler = Callable[..., None]
 
@@ -15,12 +17,15 @@ class EventBus:
         self._lock = threading.Lock()
 
     def subscribe(self, event: str, handler: EventHandler) -> None:
+        """Register a handler for the given event."""
         with self._lock:
             self._handlers[event].append(handler)
 
     def emit(self, event: str, *args, **kwargs) -> None:
+        """Emit an event to all subscribers with debug logging."""
         with self._lock:
             callbacks = list(self._handlers.get(event, ()))
+        print(f"[EVENT] Emitting: {event}")
         for cb in callbacks:
             try:
                 cb(*args, **kwargs)

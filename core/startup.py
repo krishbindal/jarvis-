@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+"""Startup sequence utilities."""
+
+import threading
 import time
 from pathlib import Path
+from typing import Callable, Optional
 
 import pygame
 
@@ -45,3 +49,21 @@ def play_startup_sound() -> None:
             pygame.mixer.quit()
         except Exception:
             pass
+
+
+def start_startup_sequence(on_complete: Optional[Callable[[], None]] = None) -> threading.Thread:
+    """Start the startup sound in a background thread to avoid UI blocking."""
+
+    def _runner() -> None:
+        try:
+            play_startup_sound()
+        finally:
+            if on_complete:
+                try:
+                    on_complete()
+                except Exception as exc:  # noqa: BLE001
+                    print(f"Startup completion callback failed: {exc}")
+
+    thread = threading.Thread(target=_runner, name="startup-audio", daemon=True)
+    thread.start()
+    return thread
