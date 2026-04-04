@@ -46,7 +46,7 @@ def play_startup_sound() -> None:
     finally:
         try:
             pygame.mixer.music.stop()
-            pygame.mixer.quit()
+            # Do NOT call mixer.quit() here, as it kills audio for the rest of the app.
         except Exception:
             pass
 

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "eugener-shell": {
+      "command": "go",
+      "args": ["run", "github.com/eugener/jarvis-mcp@latest"],
+      "enabled": false,
+      "description": "Structured shell and file tree access. (Needs Go install)"
+    },
+    "mock-server": {
+      "command": "python",
+      "args": ["test_mcp_mock_server.py"],
+      "enabled": true,
+      "description": "Local mock server for integration testing."
+    }
+  }
+}

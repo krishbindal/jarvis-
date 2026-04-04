@@ -45,6 +45,36 @@ def set_preference(key: str, value: str) -> None:
         conn.close()
 
 
+def set_personality_handler(target: str) -> Dict[str, Any]:
+    """Action handler for 'set_personality' tool. Target format: 'key:value'"""
+    try:
+        if ":" not in target:
+            return {"success": False, "message": "Invalid personality format. Use 'key:value'"}
+        
+        key, value = target.split(":", 1)
+        key = key.strip().lower()
+        value = value.strip()
+        
+        # Mapping common terms to standardized keys
+        key_map = {
+            "name": "user_name",
+            "hobby": "interests",
+            "pref": "general_pref",
+            "favorite": "favorites"
+        }
+        final_key = key_map.get(key, key)
+        
+        set_preference(final_key, value)
+        return {
+            "success": True, 
+            "status": "success", 
+            "message": f"I've updated my profile for you: {final_key} is now set to {value}.",
+            "output": f"{final_key}:{value}"
+        }
+    except Exception as e:
+        return {"success": False, "message": f"Failed to update personality: {e}"}
+
+
 def get_preference(key: str) -> Optional[str]:
     """Retrieve a user preference."""
     conn = _get_conn()
