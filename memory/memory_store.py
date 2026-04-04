@@ -1,4 +1,5 @@
 import threading
+import struct
 import numpy as np
 import requests
 from typing import Any, Dict, List, Optional
@@ -27,14 +28,17 @@ def cosine_similarity(v1, v2):
     v1, v2 = np.array(v1), np.array(v2)
     return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
 
-def save_interaction(user_input: str, steps: List[Dict[str, Any]], result: Dict[str, Any]) -> None:
-    """Save interaction with content and metadata."""
-    content = f"User: {user_input}\nResult: {result.get('output', 'Success')}"
-    # In background (or simple thread) optionally generate/update embeddings if needed
-    # For now, we store the raw content in SQLite for fast retrieval
+def _fetch_embedding_in_bg(role: str, content: str, context: Dict):
+    """Fetch embedding and store asynchronously."""
+    vec = get_embedding(content)
+    blob = struct.pack(f'{len(vec)}f', *vec) if vec else None
     with _LOCK:
-        _DB.add_interaction("user", user_input, context={"steps": steps})
-        _DB.add_interaction("assistant", str(result.get("output", "")), context={"original_query": user_input})
+        _DB.add_interaction(role, content, context=context, embedding=blob)
+
+def save_interaction(user_input: str, steps: List[Dict[str, Any]], result: Dict[str, Any]) -> None:
+    """Save interaction with content and metadata (computes vectors in background)."""
+    threading.Thread(target=_fetch_embedding_in_bg, args=("user", user_input, {"steps": steps}), daemon=True).start()
+    threading.Thread(target=_fetch_embedding_in_bg, args=("assistant", str(result.get("output", "")), {"original_query": user_input}), daemon=True).start()
 
 def get_recent_history(limit: int = 5) -> List[Dict[str, Any]]:
     """Fetch recent history from SQLite as list of dicts."""
@@ -51,26 +55,44 @@ def get_recent_history(limit: int = 5) -> List[Dict[str, Any]]:
     return result
 
 def get_relevant_context(user_input: str, limit: int = 3) -> List[Dict[str, Any]]:
-    """Semantic context retrieval using embeddings (limited to recent pool for speed)."""
+    """Semantic context retrieval using embeddings (bulk Numpy search)."""
     query_vec = get_embedding(user_input)
     if not query_vec:
-        # Fallback to recent history if Ollama embeddings unavailable
         return get_recent_history(limit)
-
+    
+    query_vec = np.array(query_vec)
+    
     with _LOCK:
-        history = _DB.get_recent_history(50)
-
+        all_embeddings = _DB.get_all_embeddings()
+        
+    if not all_embeddings:
+        return get_recent_history(limit)
+        
     scored = []
-    for entry in history:
-        content = entry.get("content", "")
-        past_vec = get_embedding(content)
-        if past_vec:
-            score = cosine_similarity(query_vec, past_vec)
+    query_norm = np.linalg.norm(query_vec)
+    
+    for entry in all_embeddings:
+        blob = entry["embedding"]
+        content = entry["content"]
+        role = entry["role"]
+        if not blob: continue
+        try:
+            vec_tuple = struct.unpack(f'{len(blob)//4}f', blob)
+            past_vec = np.array(vec_tuple)
+            score = np.dot(query_vec, past_vec) / (query_norm * np.linalg.norm(past_vec))
+            
+            # Boost score for actual knowledge sources
+            if role == "knowledge_source":
+                score *= 1.1 
+            
             scored.append((score, {
-                "user_input": content if entry.get("role") == "user" else "",
+                "user_input": content if role in ["user", "knowledge_source"] else "",
                 "steps": [],
-                "result": {"output": content if entry.get("role") == "assistant" else ""},
+                "result": {"output": content if role == "assistant" else ""},
+                "source": entry.get("context", {}).get("filename", "Memory") if role == "knowledge_source" else "History"
             }))
+        except Exception:
+            pass
 
     scored.sort(key=lambda x: x[0], reverse=True)
     return [item[1] for item in scored[:limit]]

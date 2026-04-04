@@ -32,13 +32,20 @@ from memory.personality import get_personality_context, learn_from_interaction
 from triggers.clap_detector import ClapDetector
 from triggers.wake_word import WakeWordDetector
 from triggers.clipboard_monitor import ClipboardMonitor
+from triggers.system_monitor import SystemMonitor
+from triggers.file_sorcerer import FileSorcerer
+from triggers.knowledge_indexer import KnowledgeIndexer
+from triggers.sentinel_fixer import SentinelFixer
 from ui.application import launch_ui
 from voice.voice_input import VoiceListener
 from utils.logger import get_logger
 from utils import EventBus
 from brain.ai_engine import interpret_command
 from brain.vision_provider import get_vision_provider
+from brain.researcher import DeepResearchAgent
+from brain.proactive_engine import get_proactive_engine
 from voice.tts_engine import speak, init_tts
+from memory.database import MemoryDB
 
 logger = get_logger(__name__)
 
@@ -52,7 +59,10 @@ class JarvisApp:
         self._events = EventBus()
         self._events.subscribe("jarvis_wake", self._handle_activation)
         self._events.subscribe("command_received", self._handle_command)
+        self._events.subscribe("proactive_warning", lambda msg: speak(msg))
+        
         self._clap_detector = ClapDetector(event_bus=self._events)
+        self._sys_monitor = SystemMonitor(event_bus=self._events)
         self._listener_thread: Optional[threading.Thread] = None
         self.voice = VoiceListener(self._events)
         self.stop_on_error: bool = True
@@ -72,6 +82,21 @@ class JarvisApp:
 
         # Phase 22: Clipboard Monitor
         self._clipboard = ClipboardMonitor(event_bus=self._events)
+
+        # Phase 23: File Sorcerer
+        self._sorcerer = FileSorcerer(event_bus=self._events)
+        
+        # Phase 26: Knowledge Indexer (Omniscient)
+        self._indexer = KnowledgeIndexer()
+
+        # Phase 26: Deep Research Agent
+        self._researcher = DeepResearchAgent(event_bus=self._events)
+        
+        # Phase 26: Sentinel Fixer (Self-Healing)
+        self._sentinel = SentinelFixer()
+        
+        # Database for stats
+        self._db = MemoryDB()
 
     # ─── Activation ───────────────────────────────────────────
 
@@ -126,6 +151,23 @@ class JarvisApp:
         self._clipboard.start()
         logger.info("[CLIPBOARD] Monitor started.")
 
+        # Phase 28: Start Iron Man Monitor
+        if hasattr(self, '_sys_monitor'):
+            self._sys_monitor.start()
+
+        # Phase 23: Start File Sorcerer
+        self._sorcerer.start()
+        logger.info("[SORCERER] Autonomous filing started.")
+
+        # Phase 26: Start Knowledge Indexer
+        self._indexer.start()
+
+        # Phase 26: Start Sentinel Fixer
+        self._sentinel.start()
+
+        # Phase 24: Habit prediction
+        threading.Thread(target=self._predict_needs, daemon=True).start()
+
         # Phase 26: Log loaded skills
         try:
             from skills import list_skills
@@ -143,6 +185,15 @@ class JarvisApp:
             audio_thread.join(timeout=0)
         end_ts = time.monotonic()
         logger.info("Cinematic startup completed in %.2fs", end_ts - start_ts)
+
+    def _predict_needs(self):
+        """Predict user needs on startup based on top habits (Phase 24)."""
+        habits = self._db.get_top_habits(limit=2)
+        if habits:
+            msg = "Sir, based on your previous sessions, would you like me to prepare your typical workspace? "
+            targets = [h['target'] for h in habits]
+            msg += f"I see you often use {', and '.join(targets)}."
+            speak(msg)
 
     # ─── Command Pipeline ────────────────────────────────────
 
@@ -216,6 +267,10 @@ class JarvisApp:
                 exec_result = execute_action(action, target, extra)
                 result["exec_result"] = exec_result
                 result["message"] = exec_result.get("message", result.get("message", ""))
+
+                # Phase 24: Log usage for habits
+                if action in ["open_app", "open_url", "trigger_n8n"]:
+                    self._db.log_usage(action, target)
 
                 # ── [EXECUTION] Log result ───────────────────
                 logger.info("[EXECUTION] status=%s message='%s'",
@@ -293,6 +348,10 @@ class JarvisApp:
                 step_result["exec_result"] = exec_result
                 step_result["message"] = exec_result.get("message", step_result.get("message", ""))
 
+                # Phase 24: Log usage for habits (multi-step)
+                if action in ["open_app", "open_url", "trigger_n8n"]:
+                    self._db.log_usage(action, target)
+
                 # ── [EXECUTION] Log Step ─────────────────────
                 logger.info("[EXECUTION] Step %d: status=%s message='%s'",
                             i + 1, exec_result.get("status"), exec_result.get("message", ""))
@@ -338,6 +397,10 @@ class JarvisApp:
             ai_result = interpret_command(text, history=history_entries, relevant=relevant_entries)
             steps = ai_result.get("steps") or []
 
+            ai_msg = ai_result.get("message")
+            if ai_msg:
+                speak(ai_msg)
+
             if steps:
                 validated = self._validate_ai_steps(steps)
                 if "error" in validated:
@@ -360,18 +423,13 @@ class JarvisApp:
                     for s, r in zip(validated["steps"], step_results)
                 ]
 
-                ai_msg = ai_result.get("message")
-                if ai_msg:
-                    speak(ai_msg)
-
-                result = {"steps": step_results, "type": "ai",
-                          "message": ai_result.get("message", "")}
+                result = {"steps": step_results, "type": "ai", "message": ai_msg}
             else:
-                msg = ai_result.get("message", "I'm not sure how to handle that.")
-                result = {"action": "unknown", "target": "", "message": msg, "type": "ai"}
+                result = {"action": "unknown", "target": "", "message": ai_msg or "I'm not sure how to handle that.", "type": "ai"}
         except Exception as exc:
             logger.error("[AI-FALLBACK] AI interpretation failed: %s", exc)
-            result = {"action": "error", "message": f"AI failed: {exc}", "type": "error"}
+            result = {"action": "error", "message": f"Sir, my AI systems encountered an error: {exc}", "type": "error"}
+            speak(result["message"])
 
         return result, interaction_steps
 
@@ -396,9 +454,12 @@ class JarvisApp:
             action = (step.get("action") or "").strip()
             target = step.get("target") or ""
             extra = step.get("extra") or {}
+            
             if not action:
                 return {"error": "Step missing action"}
-            if action not in ACTION_REGISTRY and action != "open_dynamic":
+            
+            # Phase 26: Support skill prefix and check against registry
+            if not action.startswith("skill:") and action not in ACTION_REGISTRY and action != "open_dynamic":
                 return {"error": f"Unsupported action: {action}"}
             key = (action, target, json.dumps(extra, sort_keys=True, default=str))
             if key in seen:
@@ -412,51 +473,47 @@ class JarvisApp:
     # ─── Proactive Intelligence (Phase 19) ────────────────────
 
     def _start_proactive_loop(self) -> None:
-        """Start the background proactivity loop."""
-        self._proactive_running = True
-        self._proactive_thread = threading.Thread(
-            target=self._proactive_worker, name="proactive-loop", daemon=True
-        )
-        self._proactive_thread.start()
-        logger.info("[PROACTIVE] Intelligence loop started.")
+        """Start the background proactivity loop using ProactiveEngine."""
+        get_proactive_engine().start()
 
-    def _proactive_worker(self) -> None:
-        """Background worker that periodically checks vision context."""
-        # Wait for system to stabilize after startup
-        time.sleep(30)
-
-        while self._proactive_running:
-            try:
-                # Get the latest visual context from the vision provider
-                visual = self._vision.last_summary
-                if visual and visual != "No visual context yet.":
-                    logger.info("[PROACTIVE] Visual context: %s", visual[:80])
-                    # Inject into session for future command awareness
-                    session.record("vision_observe", visual[:120])
-            except Exception as e:
-                logger.warning("[PROACTIVE] Loop error: %s", e)
-
-            # Check every 2 minutes
-            for _ in range(120):
-                if not self._proactive_running:
-                    return
-                time.sleep(1)
 
     # ─── Shutdown ────────────────────────────────────────────
 
     def _shutdown(self) -> None:
+        # Stop File Sorcerer (Phase 23)
+        try:
+            self._sorcerer.stop()
+        except Exception as exc:
+            logger.error("Error stopping file sorcerer: %s", exc)
+
         # Log cache stats on shutdown
         stats = route_cache.stats
         logger.info("[PERF] Cache stats: %s", stats)
 
         # Stop proactive loop
-        self._proactive_running = False
+        try:
+            get_proactive_engine().stop()
+        except Exception as exc:
+            logger.error("Error stopping proactive engine: %s", exc)
+
+        # Stop Knowledge Indexer
+        try:
+            self._indexer.stop()
+        except Exception:
+            pass
 
         # Stop vision provider
         try:
             self._vision.stop()
         except Exception as exc:
             logger.error("Error stopping vision provider: %s", exc)
+
+        # Stop Iron Man System Monitor
+        try:
+            if hasattr(self, '_sys_monitor'):
+                self._sys_monitor.stop()
+        except Exception as exc:
+            logger.error("Error stopping system monitor: %s", exc)
 
         # Stop clipboard monitor (Phase 22)
         try:
@@ -474,6 +531,12 @@ class JarvisApp:
             self._clap_detector.stop()
         except Exception as exc:
             logger.error("Error stopping clap detector: %s", exc)
+
+        # Stop Sentinel Fixer
+        try:
+            self._sentinel.stop()
+        except Exception:
+            pass
 
         if hasattr(self, 'voice'):
             try:

@@ -15,7 +15,8 @@ import threading
 import time
 from typing import Optional, Dict, Any
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from PIL import Image
 
 from config import GEMINI_API_KEY
@@ -24,7 +25,7 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 # How often to scan (seconds)
-DEFAULT_SCAN_INTERVAL = 90
+DEFAULT_SCAN_INTERVAL = 30
 VISION_MODEL = "gemini-1.5-flash"
 
 VISION_PROMPT = """You are observing a user's desktop screen. In 2-3 sentences, describe:
@@ -85,6 +86,9 @@ class VisionProvider:
         """Main background loop."""
         # Initial delay to let the system settle
         time.sleep(5)
+        from utils.resource_manager import get_resource_manager
+        rm = get_resource_manager()
+
         while self._running:
             try:
                 self._capture_and_analyze()
@@ -97,7 +101,13 @@ class VisionProvider:
                     time.sleep(300)
                     self._consecutive_errors = 0
 
-            time.sleep(self._interval)
+            # Scale interval based on system load
+            throttle = rm.get_throttle_level()
+            effective_interval = self._interval * throttle
+            if throttle > 1.0:
+                logger.debug(f"[VISION] Throttling interval to {effective_interval}s due to system load.")
+            
+            time.sleep(effective_interval)
 
     def _capture_and_analyze(self) -> str:
         """Take a screenshot and send it to Gemini Flash for analysis."""
@@ -131,13 +141,15 @@ class VisionProvider:
             buf.seek(0)
 
             # Send to Gemini Vision
-            genai.configure(api_key=GEMINI_API_KEY)
-            model = genai.GenerativeModel(VISION_MODEL)
-
-            response = model.generate_content([
-                VISION_PROMPT,
-                {"mime_type": "image/jpeg", "data": buf.read()}
-            ])
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            
+            response = client.models.generate_content(
+                model=VISION_MODEL,
+                contents=[
+                    VISION_PROMPT,
+                    types.Part.from_bytes(data=buf.read(), mime_type="image/jpeg")
+                ]
+            )
 
             summary = response.text.strip()
             with self._lock:

@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import difflib
+import pyautogui
 from pathlib import Path
 from typing import Dict, List
 
@@ -132,18 +133,32 @@ def rename_file(path: str, new_name: str) -> Dict:
         return {"success": False, "status": "error", "message": str(exc)}
 
 
-def search_file(name: str, root_path: str) -> Dict:
+def search_file(name: str, root_path: str = "") -> Dict:
+    """Fast recursive search using Windows native 'where' command."""
     try:
-        root = Path(root_path).expanduser().resolve() if root_path else Path("C:\\").resolve()
-        matches: List[str] = []
-        for entry in root.rglob(name):
-            if entry.is_file():
-                matches.append(str(entry))
-            if len(matches) >= 25:
-                break
-        logger.info("Search for %s in %s found %d matches", name, root, len(matches))
+        # Phase 16: Optimization for low-end PCs
+        # Default to user profile to avoid scanning System32/Program Files
+        search_root = os.environ.get("USERPROFILE", "C:\\Users")
+        if root_path:
+            search_root = str(_safe_path(root_path))
+
+        logger.info("[SYSTEM] Fast-searching for '%s' in %s", name, search_root)
+        
+        # 'where /r <path> <pattern>' is much faster than python's rglob
+        # We use *name* to allow partial matching
+        cmd = f'where /r "{search_root}" "*{name}*"'
+        
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=20)
+        
+        matches = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        matches = matches[:25] # Limit results for UI clarity
+
+        if not matches:
+             return {"success": True, "status": "success", "message": f"Sir, I couldn't find any files matching '{name}'.", "output": "No matches."}
+
         preview = ", ".join([Path(m).name for m in matches[:5]])
-        suffix = "" if not preview else f": {preview}"
+        suffix = f": {preview}" if preview else ""
+        
         return {
             "success": True,
             "status": "success",
@@ -151,7 +166,10 @@ def search_file(name: str, root_path: str) -> Dict:
             "data": matches,
             "output": matches,
         }
-    except Exception as exc:  # noqa: BLE001
+    except subprocess.TimeoutExpired:
+        return {"success": False, "status": "timeout", "message": "Search took too long. Try a more specific name."}
+    except Exception as exc:
+        logger.error("[SYSTEM] Search failed: %s", exc)
         return {"success": False, "status": "error", "message": str(exc)}
 
 
@@ -195,28 +213,84 @@ def execute_file_command(action: str, target: str, extra: dict | None = None) ->
         return file_info(target)
     if action == "open_app":
         return open_app(target)
+    if action == "kill_process":
+        return kill_process(target)
     return {"success": False, "message": f"Unsupported action: {action}"}
 
 
-def open_app(target: str) -> Dict:
-    target_lower = target.lower().strip()
-    logger.info("Opening %s via subprocess", target_lower)
+def kill_process(target: str) -> Dict:
+    """Terminate a running process by name or PID."""
+    if not target:
+        return {"success": False, "status": "error", "message": "No process name specified."}
+
+    target_clean = target.lower().strip().replace(".exe", "")
     
+    # Safety: Do not kill explorer.exe unless the user is very specific, 
+    # as it restarts the taskbar/desktop and looks like a crash.
+    if target_clean == "explorer":
+        return {"success": False, "status": "protected", "message": "Sir, I cannot terminate Explorer as it would crash the Windows shell."}
+
+    logger.info("Jarvis is terminating process: %s", target_clean)
+    
+    try:
+        # Use taskkill /F (Force) /IM (Image Name) /T (Tree)
+        cmd = f'taskkill /F /IM "{target_clean}.exe" /T'
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            return {"success": True, "status": "success", "message": f"Sir, I have terminated {target_clean}.", "output": result.stdout}
+        elif "not found" in result.stderr.lower():
+            # Try without .exe
+            cmd_alt = f'taskkill /F /IM "{target_clean}" /T'
+            result_alt = subprocess.run(cmd_alt, shell=True, capture_output=True, text=True)
+            if result_alt.returncode == 0:
+                return {"success": True, "status": "success", "message": f"Sir, I have terminated {target_clean}.", "output": result_alt.stdout}
+            
+            return {"success": False, "status": "not_running", "message": f"Sir, {target_clean} is not currently running.", "output": result.stderr}
+        else:
+            return {"success": False, "status": "error", "message": f"Failed to kill {target_clean}: {result.stderr}", "output": result.stderr}
+    except Exception as exc:
+        return {"success": False, "status": "error", "message": str(exc)}
+
+
+def open_app(target: str) -> Dict:
+    # Aggressively strip punctuation like dots injected by the AI or STT
+    target_lower = target.lower().strip(" .!,?")
+    
+    # Phase 16: Native Start Menu trigger
+    if target_lower == "start" or target_lower == "start menu":
+        logger.info("[SYSTEM] Triggering native Start Menu (Win key)")
+        pyautogui.press('win')
+        return {"success": True, "status": "success", "message": "Opening Start Menu", "output": "WIN_KEY"}
+
+    logger.info("Opening %s via system executor", target_lower)
+    
+    # Special Case: Chrome
     if target_lower == "chrome":
         try:
             subprocess.Popen("start chrome", shell=True)
             return {"success": True, "status": "success", "message": "Chrome launched", "output": "Chrome launched"}
         except Exception:
-            paths = [
-                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-                "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
-            ]
-            for path in paths:
-                if os.path.exists(path):
-                    subprocess.Popen(path)
-                    return {"success": True, "status": "success", "message": "Chrome launched", "output": "Chrome launched"}
-            # Fallthrough if chrome executable not found via hardcoded paths
-            
+            pass
+
+    # Special Case: Native Store Apps / URIs
+    uri_map = {
+        "whatsapp": "whatsapp:",
+        "instagram": "instagram:",
+        "spotify": "spotify:",
+        "netflix": "netflix:",
+        "messenger": "ms-messenger:"
+    }
+    
+    if target_lower in uri_map:
+        requested_uri = uri_map[target_lower]
+        logger.info(f"Target found in URI map: {target_lower} -> {requested_uri}")
+        try:
+            subprocess.run(f'start "" "{requested_uri}"', shell=True, check=True)
+            return {"success": True, "status": "success", "message": f"{target_lower} launched (native)", "output": requested_uri}
+        except Exception as e:
+            logger.warning(f"URI launch failed for {requested_uri}, falling back to shortcut scan: {e}")
+
     # Universal Windows App Scanner
     try:
         common_start = Path(os.environ.get('ALLUSERSPROFILE', 'C:\\ProgramData')) / 'Microsoft\\Windows\\Start Menu\\Programs'
@@ -229,19 +303,13 @@ def open_app(target: str) -> Dict:
                     name = p.stem.lower()
                     if "uninstall" not in name and "remove" not in name and "setup" not in name:
                         app_paths[name] = str(p)
-                for p in start_dir.rglob("*.exe"):
-                    name = p.stem.lower()
-                    if "uninstall" not in name and "remove" not in name and "setup" not in name:
-                        app_paths[name] = str(p)
                     
-        # Find exact matches, fuzzy matches or substring matches
-        # Increased cutoff to 0.75 to prevent matching unrelated keywords
+        # Find exact matches or substring matches
         matches = difflib.get_close_matches(target_lower, app_paths.keys(), n=1, cutoff=0.75)
         
         if not matches:
             for app_name in app_paths.keys():
-                # Strict substring matching (at word boundaries or direct inclusion of a significant chunk)
-                if target_lower in app_name.split() or target_lower == app_name:
+                if target_lower == app_name or target_lower in app_name.split():
                     matches.append(app_name)
                     break 
 
@@ -249,30 +317,25 @@ def open_app(target: str) -> Dict:
             best_match = matches[0]
             app_path = app_paths[best_match]
             logger.info("Found App Match: %s -> %s", best_match, app_path)
-            
-            # Startfile natively launches .lnk and .exe without blocking gracefully
             os.startfile(app_path)
-            
             return {"success": True, "status": "success", "message": f"{best_match} launched", "output": f"{best_match} launched"}
-        else:
-            # Check if it's a Microsoft Store app URI (e.g. netflix:)
-            app_uri = f"{target_lower}:"
-            logger.info(f"No specific shortcut found. Attempting generic protocol/start for {target_lower}")
-            # we will let the fallback try to start it below
+        
     except Exception as e:
         logger.error("Failed scanning installed apps: %s", e)
 
-    # Generic start fallback for unrecognized system commands
+    # Generic start fallback
     try:
-        # Try generic target launch first
-        try:
-            subprocess.run(f"start \"\" \"{target}\"", shell=True, check=True, stderr=subprocess.DEVNULL)
-            return {"success": True, "status": "success", "message": f"Fallback executed for {target}", "output": f"{target} fallback"}
-        except subprocess.CalledProcessError:
-            # If that failed, it might be a Windows Store or URI-mapped app like netflix:
-            subprocess.run(f"start \"\" \"{target}:\"", shell=True, check=True, stderr=subprocess.DEVNULL)
-            return {"success": True, "status": "success", "message": f"URI Fallback executed for {target}:", "output": f"{target} fallback"}
+        # Final attempt: direct shell start (handles URLs or in-PATH executables)
+        subprocess.run(f'start "" "{target_lower}"', shell=True, check=True, stderr=subprocess.DEVNULL)
+        return {"success": True, "status": "success", "message": f"Launched {target_lower}", "output": target_lower}
     except Exception as exc:
+        # Last ditch: try as a URI if not already tried
+        if target_lower not in uri_map:
+            try:
+                subprocess.run(f'start "" "{target_lower}:"', shell=True, check=True, stderr=subprocess.DEVNULL)
+                return {"success": True, "status": "success", "message": f"Launched {target_lower} as URI", "output": f"{target_lower}:"}
+            except Exception:
+                pass
         return {"success": False, "status": "error", "message": str(exc)}
 
 import ctypes
@@ -321,6 +384,15 @@ def capture_screen(target: str = "") -> Dict:
         return {"success": True, "status": "success", "message": f"Screen captured to {filepath}", "output": str(filepath)}
     except Exception as exc:
         return {"success": False, "status": "error", "message": f"Screen capture failed: {str(exc)}"}
+
+def run_system_check(target: str = "") -> Dict:
+    """Trigger the Sentinel Protocol (Master Diagnostic)."""
+    try:
+        # We run it via subprocess to ensure a fresh environment
+        res = subprocess.check_output(f"python jarvis_master_check.py", shell=True, stderr=subprocess.STDOUT, text=True)
+        return {"success": True, "status": "success", "message": "Master Diagnostic complete.", "output": res}
+    except Exception as exc:
+        return {"success": False, "status": "error", "message": f"Diagnostic tool failed: {str(exc)}"}
 
 def quick_search(query: str) -> Dict:
     try:

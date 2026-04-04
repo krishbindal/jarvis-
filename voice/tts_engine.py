@@ -31,13 +31,25 @@ class TTSEngine:
     def __init__(self, event_bus=None) -> None:
         try:
             if not pygame.mixer.get_init():
+                # Standard audio parameters for maximum compatibility:
+                # frequency=44100 (CD quality), size=-16 (16-bit signed), channels=2 (stereo), buffer=2048
+                pygame.mixer.pre_init(44100, -16, 2, 2048)
                 pygame.mixer.init()
-        except Exception:
-            pygame.mixer.init()
+                logger.info("[TTS] Audio mixer initialized successfully (44.1kHz, 16-bit, stereo).")
+        except Exception as e:
+            logger.error(f"[TTS] Initial audio mixer init failed: {e}. Attempting fallback.")
+            try:
+                pygame.mixer.init()
+            except Exception as e2:
+                logger.critical(f"[TTS] All audio mixer init attempts failed: {e2}")
 
         self._lock = threading.Lock()
         self._is_speaking = False
+        self._interrupted = False
         self._events = event_bus
+        
+        if self._events:
+            self._events.subscribe("interrupt_tts", self.stop)
 
     @property
     def is_speaking(self) -> bool:
@@ -65,6 +77,12 @@ class TTSEngine:
                     })
 
                 try:
+                    # Defensive: Ensure mixer is still alive before synthesis
+                    if not pygame.mixer.get_init():
+                        logger.warning("[TTS] Mixer was closed unexpectedly. Re-initializing...")
+                        pygame.mixer.pre_init(44100, -16, 2, 2048)
+                        pygame.mixer.init()
+
                     # 1. Generate Audio
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
                         tmp_path = tmp.name
@@ -74,8 +92,12 @@ class TTSEngine:
                     # 2. Play Audio
                     pygame.mixer.music.load(tmp_path)
                     pygame.mixer.music.play()
+                    self._interrupted = False
 
                     while pygame.mixer.music.get_busy():
+                        if self._interrupted:
+                            pygame.mixer.music.stop()
+                            break
                         pygame.time.Clock().tick(10)
 
                     # 3. Cleanup
@@ -94,7 +116,8 @@ class TTSEngine:
         threading.Thread(target=_speak_thread, daemon=True).start()
 
     def stop(self) -> None:
-        """Stop any active playback."""
+        """Stop any active playback immediately."""
+        self._interrupted = True
         try:
             if pygame.mixer.music.get_busy():
                 pygame.mixer.music.stop()

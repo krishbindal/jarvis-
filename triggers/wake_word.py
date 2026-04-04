@@ -110,6 +110,7 @@ class WakeWordDetector:
     def _on_wake_detected(self) -> None:
         """Fire when wake word is detected."""
         if self._events:
+            self._events.emit("interrupt_tts")
             self._events.emit("jarvis_wake")
             # Also signal overlay
             self._events.emit("overlay_state", {"state": "listening", "text": "Hey Jarvis!"})

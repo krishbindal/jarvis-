@@ -18,6 +18,8 @@ from typing import Any, Dict, Optional
 
 from skills import execute_skill
 
+from core.mcp_hub import get_mcp_hub
+
 from executor.conversion_executor import convert_to_mp3, convert_to_pdf
 from executor.download_executor import download_file, download_video
 from executor.n8n_executor import trigger_workflow
@@ -35,6 +37,8 @@ from executor.system_executor import (
     power_state,
     capture_screen,
     quick_search,
+    run_system_check,
+    kill_process,
 )
 
 logger = logging.getLogger("jarvis.executor")
@@ -68,6 +72,18 @@ def _chat_handler(target: str) -> Dict[str, Any]:
     }
     msg = _RESPONSES.get(target, "Hi! I'm Jarvis, your Dexter Copilot. How can I help you?")
     return {"success": True, "status": "success", "message": msg, "output": "greeting"}
+
+
+def _system_check_handler(target: str) -> Dict[str, Any]:
+    """Execute the Sentinel Protocol (Master Diagnostic)."""
+    try:
+        res = subprocess.check_output("python jarvis_master_check.py", shell=True, stderr=subprocess.STDOUT, text=True)
+        # Parse for the "STATUS" line to give a clean message
+        status_line = [line for line in res.split('\n') if "STATUS:" in line]
+        msg = status_line[0] if status_line else "Diagnostic completed."
+        return {"success": True, "status": "success", "message": f"Sir, I have performed a full system check. {msg}", "output": res}
+    except Exception as e:
+        return {"success": False, "status": "error", "message": f"Diagnostic failure: {e}"}
 
 
 def _open_dynamic_handler(target: str, extra: Optional[Dict] = None) -> Dict[str, Any]:
@@ -200,6 +216,7 @@ ACTION_REGISTRY = {
     "open_url": _open_url_handler,
     "open_folder": _open_folder_handler,
     "open_dynamic": None,  # Routed specially
+    "kill_process": kill_process,
     # System
     "media_control": media_control,
     "power_state": power_state,
@@ -207,6 +224,8 @@ ACTION_REGISTRY = {
     "quick_search": quick_search,
     # Conversation
     "chat": _chat_handler,
+    "system_check": _system_check_handler,
+    "set_personality": lambda target: __import__("memory.personality", fromlist=["set_personality_handler"]).set_personality_handler(target),
 }
 
 
@@ -220,24 +239,22 @@ def execute_action(
     extra: Optional[Dict[str, Any]] = None,
     previous_result: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Execute a routed action with self-healing fallback.
-
-    All execution is wrapped in _safe_exec for Phase 7 error handling.
-    """
+    """Execute a routed action with plugin system support and fallback logic."""
     extra = extra or {}
+    logger.debug(f"[EXEC] Action: {action}, Target: {target}")
 
-    # ── skill:* actions → route to Plugin System (Phase 26) ──
-    if action.startswith("skill:"):
-        skill_name = action.split(":", 1)[1]
-        return _safe_exec(execute_skill, skill_name, target, extra)
+    if action.startswith("mcp:"):
+        hub = get_mcp_hub()
+        return _safe_exec(hub.call_tool, action, extra)
 
-    # ── open_dynamic: special handler needing (target, extra) ─
+    # ── 2. Special Handlers ──────────────────────────────────
     if action == "open_dynamic":
         return _safe_exec(_open_dynamic_handler, target, extra)
 
+    # ── 3. Registry Checks ───────────────────────────────────
     func = ACTION_REGISTRY.get(action)
     if not func:
+        logger.error(f"[EXEC] Unsupported action: {action}")
         return {"success": False, "status": "error", "message": f"Unsupported action: {action}"}
 
     # ── Route with proper argument shapes ─────────────────────

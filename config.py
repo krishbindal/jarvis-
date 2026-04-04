@@ -31,5 +31,11 @@ SAFE_DIRECTORIES = [
 ]
 REQUEST_TIMEOUT = 10
 
+# Communication (Gmail Defaults)
+EMAIL_USER = os.getenv("EMAIL_USER", "your-email@gmail.com")
+EMAIL_PASS = os.getenv("EMAIL_PASS", "")  # Use App Password
+SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
