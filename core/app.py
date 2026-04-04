@@ -9,6 +9,7 @@ from typing import Optional
 from core.command_router import route_command
 from core.startup import start_startup_sequence
 from executor.download_executor import download_file, download_video
+from executor.conversion_executor import execute_conversion
 from executor.system_executor import execute_file_command
 from triggers.clap_detector import ClapDetector
 from ui.application import launch_ui
@@ -85,8 +86,9 @@ class JarvisApp:
                 result["exec_result"] = exec_result
                 result["message"] = exec_result.get("message", result.get("message", ""))
             elif result.get("type") == "conversion":
-                # Placeholder until conversion executor is added
-                result["exec_result"] = {"success": False, "message": "Conversion not yet implemented."}
+                exec_result = execute_conversion(result.get("action", ""), result.get("target", ""))
+                result["exec_result"] = exec_result
+                result["message"] = exec_result.get("message", result.get("message", ""))
             self._events.emit("command_result", result)
         except Exception as exc:  # noqa: BLE001
             print(f"Command handling failed: {exc}")
