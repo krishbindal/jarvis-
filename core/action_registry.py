@@ -1,10 +1,18 @@
 from __future__ import annotations
 
-"""Central registry for executable actions."""
+"""
+Central Action Registry with Self-Healing Execution Engine.
+
+Phase 4:  Centralized execution logic
+Phase 7:  Error handling — wrap all executors in try/except
+Phase 10: Self-healing — retry with fallback chain
+Phase 14: Clean architecture — separate executor from parser
+"""
 
 import os
 import subprocess
 import logging
+import traceback
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -27,28 +35,34 @@ from executor.system_executor import (
     quick_search,
 )
 
-logger = logging.getLogger("jarvis.action_registry")
+logger = logging.getLogger("jarvis.executor")
 
 
-# ───────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────
 # Dynamic Handlers
-# ───────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────
 
 def _chat_handler(target: str) -> Dict[str, Any]:
-    """Handle conversational/greeting messages."""
+    """Handle conversational/greeting messages with varied responses."""
     _RESPONSES = {
-        "hi":  "Hey there! How can I help?",
-        "hello":  "Hello! What can I do for you?",
-        "hey":  "Hey! I'm listening.",
-        "how are you": "I'm running at peak performance! What do you need?",
-        "thanks": "You're welcome! Anything else?",
-        "thank you": "Happy to help!",
-        "bye": "See you later! Just call me when you need me.",
-        "goodbye": "Goodbye! I'll be here when you need me.",
-        "good morning": "Good morning! Ready to get things done.",
-        "good evening": "Good evening! How can I help?",
-        "good afternoon": "Good afternoon! What's on the agenda?",
-        "good night": "Good night! Sweet dreams.",
+        "hi":            "Hey there! How can I help?",
+        "hello":         "Hello! What can I do for you?",
+        "hey":           "Hey! I'm listening.",
+        "yo":            "Yo! What's up?",
+        "hola":          "Hola! How can I assist you?",
+        "how are you":   "I'm running at peak performance! What do you need?",
+        "how r u":       "Doing great! What can I do for you?",
+        "thanks":        "You're welcome! Anything else?",
+        "thank you":     "Happy to help!",
+        "bye":           "See you later! Just call me when you need me.",
+        "goodbye":       "Goodbye! I'll be here when you need me.",
+        "see you":       "See you! I'll be ready when you're back.",
+        "good morning":  "Good morning! Ready to get things done.",
+        "good evening":  "Good evening! How can I help?",
+        "good afternoon":"Good afternoon! What's on the agenda?",
+        "good night":    "Good night! Sweet dreams.",
+        "sup":           "Not much! What do you need?",
+        "what's up":     "All systems nominal! How can I help?",
     }
     msg = _RESPONSES.get(target, "Hi! I'm Jarvis, your Dexter Copilot. How can I help you?")
     return {"success": True, "status": "success", "message": msg, "output": "greeting"}
@@ -56,68 +70,74 @@ def _chat_handler(target: str) -> Dict[str, Any]:
 
 def _open_dynamic_handler(target: str, extra: Optional[Dict] = None) -> Dict[str, Any]:
     """
-    Universal dynamic open handler.
-    
-    Handles:
-        - URLs in specific browsers: start chrome "https://..."
-        - Files in specific editors:  code "report.pdf"
-        - Generic URL / file open:    start "" "https://..."
-    
-    Args:
-        target: The resolved URL, file path, or folder path
-        extra:  { "app": "chrome", "resolved_type": "url" | "file" }
+    Universal dynamic open handler with self-healing fallback chain (Phase 10).
+
+    Fallback order:
+        1. Specific app launch (start chrome "URL")
+        2. System default handler (start "" "URL")
+        3. os.startfile() as last resort
     """
     extra = extra or {}
     app = extra.get("app", "")
     resolved_type = extra.get("resolved_type", "url")
 
-    try:
-        if app:
-            logger.info(f"[DYNAMIC] Opening {resolved_type} '{target}' in app '{app}'")
-            # Build the launch command
-            if app in ("chrome", "msedge", "firefox", "brave"):
-                # Browser → pass URL as argument
+    attempts = []
+
+    # ── Attempt 1: Open with specified app ────────────────────
+    if app:
+        try:
+            logger.info("[EXEC] Attempt 1: Opening %s '%s' in '%s'", resolved_type, target, app)
+            if app in ("chrome", "msedge", "firefox", "brave", "opera"):
                 subprocess.Popen(f'start {app} "{target}"', shell=True)
             elif app in ("code",):
-                # VS Code → use code CLI
                 subprocess.Popen(f'code "{target}"', shell=True)
             elif app in ("explorer",):
-                # Explorer → open folder / file location
                 subprocess.Popen(f'explorer "{target}"', shell=True)
-            elif app in ("notepad", "notepad++"):
-                subprocess.Popen(f'start {app} "{target}"', shell=True)
             else:
-                # Generic: try start <app> "<target>"
                 subprocess.Popen(f'start {app} "{target}"', shell=True)
-        else:
-            logger.info(f"[DYNAMIC] Opening '{target}' with system default")
-            subprocess.Popen(f'start "" "{target}"', shell=True)
 
-        return {
-            "success": True, "status": "success",
-            "message": f"Opening {target}" + (f" in {app}" if app else ""),
-            "output": target,
-        }
-    except Exception as exc:
-        logger.error(f"[DYNAMIC] Failed to open {target}: {exc}")
-        # Fallback: try system default
-        try:
-            os.startfile(target)
             return {"success": True, "status": "success",
-                    "message": f"Opened {target} (fallback)", "output": target}
-        except Exception as exc2:
-            return {"success": False, "status": "error", "message": str(exc2)}
+                    "message": f"Opening {target} in {app}", "output": target}
+        except Exception as exc:
+            attempts.append(f"App launch failed ({app}): {exc}")
+            logger.warning("[EXEC] Attempt 1 failed: %s", exc)
+
+    # ── Attempt 2: System default (start "" "target") ─────────
+    try:
+        logger.info("[EXEC] Attempt 2: Opening '%s' with system default", target)
+        subprocess.Popen(f'start "" "{target}"', shell=True)
+        return {"success": True, "status": "success",
+                "message": f"Opening {target}", "output": target}
+    except Exception as exc:
+        attempts.append(f"System start failed: {exc}")
+        logger.warning("[EXEC] Attempt 2 failed: %s", exc)
+
+    # ── Attempt 3: os.startfile fallback ──────────────────────
+    try:
+        logger.info("[EXEC] Attempt 3: os.startfile fallback for '%s'", target)
+        os.startfile(target)
+        return {"success": True, "status": "success",
+                "message": f"Opened {target} (fallback)", "output": target}
+    except Exception as exc:
+        attempts.append(f"os.startfile failed: {exc}")
+        logger.error("[EXEC] All 3 attempts failed for '%s': %s", target, attempts)
+
+    return {
+        "success": False, "status": "error",
+        "message": f"Failed to open {target} after 3 attempts",
+        "output": "; ".join(attempts),
+    }
 
 
 def _open_url_handler(target: str) -> Dict[str, Any]:
-    """Open a URL in the default browser (legacy compat)."""
+    """Legacy compat: open URL with system default."""
     return _open_dynamic_handler(target, extra={"resolved_type": "url"})
 
 
 def _open_folder_handler(target: str) -> Dict[str, Any]:
-    """Open a folder in Windows Explorer."""
+    """Open a folder with self-healing fallback."""
+    path = Path(target).expanduser().resolve()
     try:
-        path = Path(target).expanduser().resolve()
         if path.exists():
             os.startfile(str(path))
         else:
@@ -125,12 +145,35 @@ def _open_folder_handler(target: str) -> Dict[str, Any]:
         return {"success": True, "status": "success",
                 "message": f"Opening folder: {path}", "output": str(path)}
     except Exception as exc:
-        return {"success": False, "status": "error", "message": str(exc)}
+        logger.warning("[EXEC] Folder open failed, trying explorer: %s", exc)
+        try:
+            subprocess.Popen(f'explorer "{path}"', shell=True)
+            return {"success": True, "status": "success",
+                    "message": f"Opening folder: {path} (fallback)", "output": str(path)}
+        except Exception as exc2:
+            return {"success": False, "status": "error", "message": str(exc2)}
 
 
-# ───────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────
+# Safe Executor Wrapper (Phase 7 — Error Handling)
+# ───────────────────────────────────────────────────────────
+
+def _safe_exec(func, *args, **kwargs) -> Dict[str, Any]:
+    """Wrap any executor function in try/except with structured error info."""
+    try:
+        return func(*args, **kwargs)
+    except Exception as exc:
+        logger.error("[EXEC] Action failed: %s\n%s", exc, traceback.format_exc())
+        return {
+            "success": False, "status": "error",
+            "message": f"Execution failed: {exc}",
+            "output": traceback.format_exc(),
+        }
+
+
+# ───────────────────────────────────────────────────────────
 # Action Registry
-# ───────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────
 
 ACTION_REGISTRY = {
     # File operations
@@ -150,12 +193,12 @@ ACTION_REGISTRY = {
     "convert_to_pdf": convert_to_pdf,
     # Automation
     "trigger_n8n": trigger_workflow,
-    # Apps & URLs (dynamic)
+    # Apps & URLs
     "open_app": open_app,
     "open_url": _open_url_handler,
     "open_folder": _open_folder_handler,
-    "open_dynamic": None,  # Handled specially in execute_action
-    # System controls
+    "open_dynamic": None,  # Routed specially
+    # System
     "media_control": media_control,
     "power_state": power_state,
     "capture_screen": capture_screen,
@@ -165,9 +208,9 @@ ACTION_REGISTRY = {
 }
 
 
-# ───────────────────────────────────────────────
-# Executor
-# ───────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────
+# Executor (Phase 4 + Phase 7 + Phase 10)
+# ───────────────────────────────────────────────────────────
 
 def execute_action(
     action: str,
@@ -175,29 +218,33 @@ def execute_action(
     extra: Optional[Dict[str, Any]] = None,
     previous_result: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Execute a routed action."""
+    """
+    Execute a routed action with self-healing fallback.
+
+    All execution is wrapped in _safe_exec for Phase 7 error handling.
+    """
     extra = extra or {}
 
-    # ── Special: open_dynamic (needs target + extra together) ──────
+    # ── open_dynamic: special handler needing (target, extra) ─
     if action == "open_dynamic":
-        return _open_dynamic_handler(target, extra)
+        return _safe_exec(_open_dynamic_handler, target, extra)
 
     func = ACTION_REGISTRY.get(action)
     if not func:
         return {"success": False, "status": "error", "message": f"Unsupported action: {action}"}
 
-    # ── Route with proper argument shapes ──────────────────────────
+    # ── Route with proper argument shapes ─────────────────────
     if action == "create_folder":
-        return func(target, extra.get("path"))
+        return _safe_exec(func, target, extra.get("path"))
     if action in ("move_file", "copy_file"):
-        return func(extra.get("source", ""), target)
+        return _safe_exec(func, extra.get("source", ""), target)
     if action == "rename_file":
-        return func(target, extra.get("new_name", ""))
+        return _safe_exec(func, target, extra.get("new_name", ""))
     if action == "search_file":
-        return func(target, extra.get("root_path", ""))
+        return _safe_exec(func, target, extra.get("root_path", ""))
     if action == "trigger_n8n":
         data = dict(extra)
         if previous_result and "previous_output" not in data:
             data["previous_output"] = previous_result.get("output", previous_result)
-        return func(target or action, data)
-    return func(target)
+        return _safe_exec(func, target or action, data)
+    return _safe_exec(func, target)

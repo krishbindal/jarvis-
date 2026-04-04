@@ -1,0 +1,103 @@
+﻿======================================================================
+  JARVIS-X Advanced Intelligence Upgrade ΓÇö Test Suite
+======================================================================
+
+  ΓöÇΓöÇΓöÇ Phase 1: Universal Command Parsing ΓöÇΓöÇΓöÇ
+  [OK]   open youtube
+  [OK]   open github.com
+  [OK]   open report.pdf
+  [OK]   search python tips
+  [OK]   play music
+  [OK]   run workflow backup
+
+  ΓöÇΓöÇΓöÇ Phase 2: Target Intelligence ΓöÇΓöÇΓöÇ
+  [OK]   google.com ΓåÆ url type
+  [OK]   report.pdf ΓåÆ file type
+  [OK]   open downloads folder
+  [OK]   open some random thing
+
+  ΓöÇΓöÇΓöÇ Phase 3: Smart URL Handling ΓöÇΓöÇΓöÇ
+  [OK]   youtube ΓåÆ youtube.com
+  [OK]   google ΓåÆ google.com
+  [OK]   stackoverflow ΓåÆ SO url
+
+  ΓöÇΓöÇΓöÇ Phase 4: Execution Engine ΓöÇΓöÇΓöÇ
+  [OK]   open youtube on chrome ΓåÆ open_dynamic
+  [OK]     app = chrome
+  [OK]   open github in edge ΓåÆ open_dynamic
+  [OK]     app = msedge
+  [OK]   open notes.txt in vscode
+  [OK]     app = code
+  [OK]     type = file
+
+  ΓöÇΓöÇΓöÇ Phase 5: Multi-Step Commands ΓöÇΓöÇΓöÇ
+  [OK]   split 'open chrome and search youtube'
+  [OK]     step 1 = open chrome
+  [OK]     step 2 = search youtube
+  [OK]   split 'open youtube then play music'
+  [OK]   3-step: 'open chrome and then search google and also open spotify'
+  [OK]   route_command returns list for multi-step
+  [OK]     multi-step actions
+  [OK]   single command stays single
+
+  ΓöÇΓöÇΓöÇ Phase 6: Context Awareness ΓöÇΓöÇΓöÇ
+  [OK]   context: last_app = chrome
+  [OK]   context: last_action
+  [OK]   context: get_context_app
+  [OK]   context: after non-browser, last_app still chrome
+  [OK]   context: clear resets
+
+  ΓöÇΓöÇΓöÇ Phase 9: Normalization ΓöÇΓöÇΓöÇ
+  [OK]   strip 'please'
+  [OK]   strip 'can you'
+  [OK]   strip 'jarvis'
+  [OK]   strip chained fillers
+  [OK]   strip 'now'
+  [OK]   lowercase + collapse
+  [OK]   strip 'i want to'
+
+  ΓöÇΓöÇΓöÇ Phase 11: Caching ΓöÇΓöÇΓöÇ
+  [OK]   cache hit
+  [OK]   cache miss
+  [OK]   cache stats: 1 hit
+  [OK]   cache stats: 1 miss
+
+  ΓöÇΓöÇΓöÇ Greetings ΓöÇΓöÇΓöÇ
+  [OK]   greeting: hi
+  [OK]   greeting: hello
+  [OK]   greeting: how are you
+  [OK]   greeting: thanks
+  [OK]   greeting: good morning
+  [OK]   greeting: bye
+  [OK]   greeting: yo
+  [OK]   greeting: hola
+
+  ΓöÇΓöÇΓöÇ Navigation ΓöÇΓöÇΓöÇ
+  [OK]   go to downloads
+  [OK]   take me to desktop
+  [OK]   navigate to documents
+  [OK]   now go to downloads
+
+  ΓöÇΓöÇΓöÇ Media Controls ΓöÇΓöÇΓöÇ
+  [OK]   pause music
+  [OK]   skip this song
+  [OK]   volume up
+  [OK]   mute
+
+  ΓöÇΓöÇΓöÇ Power Controls ΓöÇΓöÇΓöÇ
+  [OK]   lock computer
+
+  ΓöÇΓöÇΓöÇ Screen ΓöÇΓöÇΓöÇ
+  [OK]   take screenshot
+
+  ΓöÇΓöÇΓöÇ Search ΓöÇΓöÇΓöÇ
+  [OK]   search for python tips
+  [OK]   what is machine learning
+
+  ΓöÇΓöÇΓöÇ Fallback ΓöÇΓöÇΓöÇ
+  [OK]   unknown ΓåÆ AI fallback
+
+======================================================================
+  Result: 65/65 passed
+  ALL TESTS PASSED!
+======================================================================
