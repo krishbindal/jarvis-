@@ -8,6 +8,7 @@ from typing import Optional
 
 from core.command_router import route_command
 from core.startup import start_startup_sequence
+from executor.system_executor import execute_file_command
 from triggers.clap_detector import ClapDetector
 from ui.application import launch_ui
 from utils import EventBus
@@ -74,6 +75,10 @@ class JarvisApp:
         try:
             text = payload.get("text", "")
             result = route_command(text)
+            if result.get("type") == "file":
+                exec_result = execute_file_command(result.get("action", ""), result.get("target", ""), result.get("extra", {}))
+                result["exec_result"] = exec_result
+                result["message"] = exec_result.get("message", result.get("message", ""))
             self._events.emit("command_result", result)
         except Exception as exc:  # noqa: BLE001
             print(f"Command handling failed: {exc}")
