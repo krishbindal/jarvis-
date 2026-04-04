@@ -2,8 +2,10 @@ from __future__ import annotations
 
 """Jarvis-themed UI with command emission and logging."""
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QPalette, QPainter, QPen
+import os
+import sys
+from PySide6.QtCore import Qt, QTimer, QPoint
+from PySide6.QtGui import QColor, QFont, QPalette, QPainter, QPen, QLinearGradient
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -14,198 +16,230 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
     QWidget,
+    QGraphicsDropShadowEffect,
 )
 
 from utils import EventBus
+from utils.system_context import get_system_stats
+import math
 
-
+# UI Constants
 ACCENT = "#00ffff"
-BACKGROUND = "#000000"
-
+NEON_GLOW = "rgba(0, 255, 255, 120)"
 
 class JarvisWindow(QMainWindow):
-    """Futuristic themed window for JARVIS-X."""
+    """Modern, Glassmorphism-themed window for JARVIS-X."""
 
     def __init__(self, event_bus: EventBus) -> None:
         super().__init__()
         self._events = event_bus
         self.setWindowTitle("JARVIS-X")
-        self.setMinimumSize(960, 640)
-        self._apply_palette()
+        self.setMinimumSize(1000, 700)
+        
+        # Frameless and Transparent
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        self._setup_glass_effect()
         self._build_layout()
+        self._load_styles()
+        
         self._events.subscribe("command_result", self._on_command_result)
+        self._drag_pos = QPoint()
 
-    def _apply_palette(self) -> None:
-        palette = QPalette()
-        palette.setColor(QPalette.Window, QColor(BACKGROUND))
-        palette.setColor(QPalette.WindowText, QColor(ACCENT))
-        palette.setColor(QPalette.Base, QColor("#050505"))
-        palette.setColor(QPalette.Text, QColor("#e0ffff"))
-        palette.setColor(QPalette.Button, QColor("#021018"))
-        palette.setColor(QPalette.ButtonText, QColor(ACCENT))
-        self.setPalette(palette)
+    def _setup_glass_effect(self) -> None:
+        """Enable Windows 11 Acrylic effect if available."""
+        try:
+            from winmica import ApplyMica
+            # Apply Mica/Acrylic to the HWND
+            ApplyMica(int(self.winId()), True) # Dark Mode Acrylic
+        except Exception:
+            pass
+
+    def _load_styles(self) -> None:
+        qss_path = os.path.join(os.path.dirname(__file__), "styles.qss")
+        if os.path.exists(qss_path):
+            with open(qss_path, "r") as f:
+                self.setStyleSheet(f.read())
 
     def _build_layout(self) -> None:
-        main = QWidget()
-        layout = QVBoxLayout()
-        layout.setSpacing(14)
-        layout.setContentsMargins(20, 20, 20, 20)
+        self.central = QWidget()
+        self.central.setObjectName("CentralWidget")
+        self.setCentralWidget(self.central)
+        
+        layout = QVBoxLayout(self.central)
+        layout.setSpacing(15)
+        layout.setContentsMargins(30, 30, 30, 30)
 
-        title = QLabel("JARVIS-X — LOCAL AI ASSISTANT")
-        title.setAlignment(Qt.AlignCenter)
-        title_font = QFont("Segoe UI Semibold", 21)
-        title_font.setLetterSpacing(QFont.PercentageSpacing, 115)
-        title.setFont(title_font)
-        title.setStyleSheet(f"color: {ACCENT}; text-transform: uppercase;")
+        # Custom Title Bar / Header
+        header = QHBoxLayout()
+        self.title_label = QLabel("JARVIS-X // COPILOT")
+        self.title_label.setObjectName("Title")
+        
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(30, 30)
+        close_btn.setStyleSheet("background: transparent; border: none; font-size: 18px; color: #ff5555;")
+        close_btn.clicked.connect(self.close)
+        
+        header.addWidget(self.title_label)
+        header.addStretch()
+        header.addWidget(close_btn)
 
-        self.status_label = QLabel("Status: Idle")
+        self.status_label = QLabel("SYSTEM READY")
+        self.status_label.setObjectName("Status")
         self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setStyleSheet("color: #36d7ff; font-size: 14px;")
 
-        hud = HUDWidget()
-        hud.setFixedHeight(240)
+        # HUD Section
+        hud_container = QWidget()
+        hud_container.setFixedHeight(260)
+        hud_layout = QVBoxLayout(hud_container)
+        self.hud = HUDWidget()
+        hud_layout.addWidget(self.hud)
 
+        # Input Section
         self.command_input = QLineEdit()
-        command_input.setPlaceholderText("Type a command or speak after the chime...")
-        command_input.setStyleSheet(
-            f"""
-            QLineEdit {{
-                padding: 12px;
-                border: 1px solid #005f6a;
-                border-radius: 10px;
-                background: #050b11;
-                color: #e0ffff;
-            }}
-            QLineEdit:focus {{
-                border: 1px solid {ACCENT};
-                box-shadow: 0 0 12px {ACCENT}33;
-            }}
-            """
-        )
-
+        self.command_input.setPlaceholderText("Direct system command input...")
         self.command_input.returnPressed.connect(self._emit_command)
 
-        execute = QPushButton("Engage")
+        execute = QPushButton("ENGAGE")
         execute.setCursor(Qt.PointingHandCursor)
-        execute.setStyleSheet(
-            f"""
-            QPushButton {{
-                padding: 12px;
-                background-color: #021018;
-                color: {ACCENT};
-                border: 1px solid {ACCENT};
-                border-radius: 12px;
-            }}
-            QPushButton:hover {{
-                background-color: #032536;
-            }}
-            QPushButton:pressed {{
-                background-color: #021621;
-            }}
-            """
-        )
-
         execute.clicked.connect(self._emit_command)
 
-        command_row = QHBoxLayout()
-        command_row.setSpacing(10)
-        command_row.addWidget(self.command_input, stretch=1)
-        command_row.addWidget(execute)
+        input_row = QHBoxLayout()
+        input_row.setSpacing(12)
+        input_row.addWidget(self.command_input, stretch=1)
+        input_row.addWidget(execute)
 
-        log_label = QLabel("Command Log")
-        log_label.setStyleSheet(f"color: {ACCENT}; font-size: 13px;")
-
+        # Documentation / console
         self.console = QTextEdit()
         self.console.setReadOnly(True)
-        self.console.setPlaceholderText("System logs and responses will appear here.")
-        self.console.setFrameStyle(QFrame.NoFrame)
-        self.console.setStyleSheet(
-            """
-            QTextEdit {
-                background: #050b11;
-                color: #9cf6ff;
-                border: 1px solid #005f6a;
-                border-radius: 12px;
-                padding: 12px;
-            }
-            """
-        )
-
-        layout.addWidget(title)
+        self.console.setPlaceholderText("Awaiting neural link...")
+        
+        layout.addLayout(header)
         layout.addWidget(self.status_label)
-        layout.addWidget(hud)
-        layout.addLayout(command_row)
-        layout.addWidget(log_label)
+        layout.addWidget(hud_container)
+        layout.addLayout(input_row)
         layout.addWidget(self.console, stretch=1)
 
-        main.setLayout(layout)
-        self.setCentralWidget(main)
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event) -> None:
+        if event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self._drag_pos)
+            event.accept()
 
     def _emit_command(self) -> None:
         text = self.command_input.text().strip()
         if not text:
             return
-        self._append_log(f"YOU: {text}")
+        self._append_log(f"USR > {text}")
         self.command_input.clear()
         self._events.emit("command_received", {"text": text})
-        self.status_label.setText("Status: Processing command...")
+        self.status_label.setText("ANALYZING...")
 
     def _on_command_result(self, payload: dict) -> None:
-        message = payload.get("message") or "Command processed."
+        message = payload.get("message") or "Logic complete."
         action = payload.get("action", "")
-        target = payload.get("target", "")
-        detail = f"{message} ({action} -> {target})".strip()
-        self._append_log(f"SYSTEM: {detail}")
-        self.status_label.setText("Status: Idle")
+        self._append_log(f"JARVIS > {message}")
+        self.status_label.setText("SYSTEM READY")
 
     def _append_log(self, line: str) -> None:
         self.console.append(line)
 
 
 class HUDWidget(QWidget):
-    """Lightweight circular HUD animation."""
+    """Futuristic circular HUD with neon glow and high-end gradients."""
 
     def __init__(self) -> None:
         super().__init__()
         self._angle = 0.0
+        self._pulse = 0.0
+        self._stats = {
+            "cpu_percent": 0.0,
+            "memory_percent": 0.0,
+            "battery_percent": None,
+            "active_window": "System"
+        }
+        
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(30)
+        self._timer.start(30) # Animation Timer
+        
+        self._stats_timer = QTimer(self)
+        self._stats_timer.timeout.connect(self._update_stats)
+        self._stats_timer.start(1000) # 1Hz Stats Update
 
     def _tick(self) -> None:
-        self._angle = (self._angle + 2.5) % 360
+        # Rotation speed based on CPU Load: Base 1.0 + Scale 0.1 * CPU%
+        rotation_speed = 1.0 + (self._stats["cpu_percent"] * 0.1)
+        self._angle = (self._angle + rotation_speed) % 360
+        self._pulse = (self._pulse + 0.05) % 6.28 # Sin Wave for Pulse
         self.update()
 
-    def paintEvent(self, event) -> None:  # type: ignore[override]
+    def _update_stats(self) -> None:
+        self._stats = get_system_stats()
+
+    def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.fillRect(self.rect(), QColor(BACKGROUND))
-
+        
         center = self.rect().center()
-        radius = min(self.width(), self.height()) // 2 - 14
-        accent = QColor(ACCENT)
-
-        rings = [radius, int(radius * 0.72), int(radius * 0.48)]
-        widths = [2, 2, 2]
-        for r, w in zip(rings, widths, strict=False):
-            pen = QPen(accent)
-            pen.setWidth(w)
-            pen.setCosmetic(True)
-            pen.setStyle(Qt.DotLine if r != radius else Qt.SolidLine)
-            painter.setPen(pen)
-            painter.drawEllipse(center, r, r)
-
+        radius = min(self.width(), self.height()) // 2 - 20
+        
+        # Base pulsing glow
+        import math
+        alpha = int(100 + 50 * math.sin(self._pulse))
+        accent = QColor(0, 255, 255, alpha)
+        
+        # Outer Ring
         pen = QPen(accent)
-        pen.setWidth(3)
-        pen.setCapStyle(Qt.RoundCap)
+        pen.setWidth(2)
         painter.setPen(pen)
-        start_angle = int(self._angle * 16)
-        span_angle = int(120 * 16)
+        painter.drawEllipse(center, radius, radius)
+        
+        # Rotating Arcs
+        pen.setWidth(4)
+        painter.setPen(pen)
         painter.drawArc(
-            center.x() - rings[1],
-            center.y() - rings[1],
-            rings[1] * 2,
-            rings[1] * 2,
-            start_angle,
-            span_angle,
+            center.x() - radius, center.y() - radius, radius * 2, radius * 2,
+            int(self._angle * 16), int(60 * 16)
         )
+        painter.drawArc(
+            center.x() - radius, center.y() - radius, radius * 2, radius * 2,
+            int((self._angle + 180) * 16), int(60 * 16)
+        )
+        
+        # Inner Data Rings
+        inner_r = int(radius * 0.7)
+        pen.setWidth(1)
+        pen.setStyle(Qt.DotLine)
+        painter.setPen(pen)
+        painter.drawEllipse(center, inner_r, inner_r)
+        
+        # Scanning line
+        pen.setStyle(Qt.SolidLine)
+        pen.setWidth(2)
+        painter.setPen(pen)
+        scan_angle = (self._angle * 2) % 360
+        px = center.x() + inner_r * math.cos(math.radians(scan_angle))
+        py = center.y() + inner_r * math.sin(math.radians(scan_angle))
+        painter.drawLine(center.x(), center.y(), int(px), int(py))
+        
+        # Performance Overlay (Neural Metadata)
+        painter.setPen(QColor(0, 255, 255, 180))
+        painter.setFont(QFont("Segoe UI Semibold", 8))
+        
+        # Bottom Left: Window Info
+        win_text = (self._stats["active_window"][:25] + "..") if len(self._stats["active_window"]) > 25 else self._stats["active_window"]
+        painter.drawText(center.x() - radius, center.y() + radius + 15, f"CTX: {win_text.upper()}")
+        
+        # Top Right: CPU/RAM
+        painter.drawText(center.x() + radius - 60, center.y() - radius - 5, f"CPU: {int(self._stats['cpu_percent'])}%")
+        painter.drawText(center.x() + radius - 60, center.y() - radius + 10, f"RAM: {int(self._stats['memory_percent'])}%")
+        
+        # Bottom Right: Battery
+        if self._stats["battery_percent"] is not None:
+            painter.drawText(center.x() + radius - 60, center.y() + radius + 15, f"PWR: {int(self._stats['battery_percent'])}%")

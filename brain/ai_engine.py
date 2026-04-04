@@ -3,18 +3,22 @@ from __future__ import annotations
 """AI engine using Ollama as a fallback command interpreter."""
 
 import json
+import base64
+import os
 from typing import Any, Dict, Iterable
 
 import requests
 from utils.logger import get_logger
 from config import MODEL_NAME
+from utils.system_context import get_system_stats
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 logger = get_logger(__name__)
 
 SYSTEM_PROMPT = """
-You are Jarvis AI.
-Convert user input into a JSON list of steps. You may refer to previous outputs in next steps. Relevant past actions may be provided to help you plan.
+You are Jarvis, a high-end, proactive 'Dexter Copilot' style agent. 
+You are a professional teammate, not just a tool. Be concise, polite, and technically proficient.
+You have universal access to the system and can see the screen.
 
 Available tools:
 * list_files: list files in a directory
@@ -30,14 +34,24 @@ Available tools:
 * convert_to_mp3: convert file to mp3
 * convert_to_pdf: convert file to pdf
 * trigger_n8n: run external workflow
-* open_app
-* open_url
+* open_app: open a system application
+* open_url: open a website in the browser
+* media_control: control playback (play, pause, next, prev, volume_up, volume_down, mute)
+* power_state: system power actions (lock, sleep)
+* capture_screen: capture the current screen to memory
+* quick_search: search the web for real-time information
+
+Operational Guidelines:
+1. If the user asks about something on their screen, use 'capture_screen' first, then analyze.
+2. If you need real-time data, use 'quick_search'.
+3. Use media/power controls for OS automation requests.
 
 Respond ONLY in JSON:
 {
 "steps": [
   { "action": "...", "target": "...", "extra": {} }
-]
+],
+"message": "A brief, natural language confirmation of what you are doing."
 }
 """
 
@@ -115,19 +129,60 @@ def _format_relevant(relevant: Iterable[Dict[str, Any]] | None) -> str:
     return "\n".join(lines)
 
 
+def describe_screen(prompt: str = "What is on the screen?") -> str:
+    """Analyze the last captured screen using LLaVA vision model."""
+    img_path = "assets/memory/last_screen.png"
+    if not os.path.exists(img_path):
+        return "I can't see the screen right now. Please tell me to capture it first."
+    
+    try:
+        with open(img_path, "rb") as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+        
+        payload = {
+            "model": "llava:7b",
+            "prompt": prompt,
+            "images": [encoded_string],
+            "stream": False,
+        }
+        
+        logger.info("Sending screen to LLaVA vision model")
+        resp = requests.post(OLLAMA_URL, json=payload, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("response", "I see it, but I can't quite describe it.")
+    except Exception as exc:
+        logger.error(f"Vision analysis failed: {exc}")
+        return f"Vision error: {exc}"
+
+
 def interpret_command(
     user_input: str, history: Iterable[Dict[str, Any]] | None = None, relevant: Iterable[Dict[str, Any]] | None = None
 ) -> Dict[str, Any]:
+    stats = get_system_stats()
+    sys_context = f"\nSYSTEM PERFORMANCE: CPU {stats['cpu_percent']}%, RAM {stats['memory_percent']}%"
+    if stats['battery_percent'] is not None:
+        sys_context += f", Battery {stats['battery_percent']}%"
+    sys_context += f"\nACTIVE WINDOW: {stats['active_window']}"
+
     history_text = _format_history(history)
     relevant_text = _format_relevant(relevant)
+    
+    # If the user asks "what's on my screen" or "explain this screen", 
+    # we should handle it specifically or inform the AI it can 'see'.
+    screen_context = ""
+    if any(k in user_input.lower() for k in ["screen", "see", "looking at", "this"]):
+        analysis = describe_screen("Analyze this screen carefully and describe what's happening. If there's code, identify the language and purpose.")
+        screen_context = f"\n\nCURRENT VISUAL CONTEXT (From your vision module):\n{analysis}"
+
     payload = {
         "model": MODEL_NAME,
-        "prompt": f"{SYSTEM_PROMPT}\nUser history:\n{history_text}\n\nRelevant past actions:\n{relevant_text}\n\nUser: {user_input}\nAssistant:",
+        "prompt": f"{SYSTEM_PROMPT}\n{sys_context}\n\nUser history:\n{history_text}\n\nRelevant past actions:\n{relevant_text}{screen_context}\n\nUser: {user_input}\nAssistant:",
         "stream": False,
     }
     try:
         logger.info("Sending prompt to AI model")
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=15)
+        resp = requests.post(OLLAMA_URL, json=payload, timeout=20)
         resp.raise_for_status()
         data = resp.json()
         output = data.get("response", "") or data.get("generated_text", "")

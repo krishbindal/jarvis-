@@ -1,0 +1,70 @@
+/* Jarvis Glassmorphism Style */
+
+QMainWindow {
+    background-color: transparent;
+}
+
+QWidget#CentralWidget {
+    background: rgba(10, 20, 30, 160); /* Semi-transparent base */
+    border-radius: 20px;
+    border: 1px solid rgba(0, 255, 255, 60);
+}
+
+QLabel#Title {
+    color: #00ffff;
+    font-size: 26px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    margin-bottom: 5px;
+    text-transform: uppercase;
+}
+
+QLabel#Status {
+    color: #36d7ff;
+    font-size: 13px;
+    padding: 4px;
+    background: rgba(0, 0, 0, 100);
+    border-radius: 8px;
+}
+
+QLineEdit {
+    background: rgba(5, 15, 25, 200);
+    border: 1px solid rgba(0, 255, 255, 80);
+    border-radius: 12px;
+    padding: 14px;
+    color: #e0ffff;
+    font-size: 15px;
+}
+
+QLineEdit:focus {
+    border: 2px solid #00ffff;
+    background: rgba(5, 20, 35, 230);
+}
+
+QTextEdit {
+    background: rgba(2, 8, 12, 180);
+    border: 1px solid rgba(0, 255, 255, 50);
+    border-radius: 15px;
+    padding: 12px;
+    color: #9cf6ff;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 14px;
+}
+
+QPushButton {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #005f6a, stop:1 #002d33);
+    border: 1px solid #00ffff;
+    border-radius: 12px;
+    color: #00ffff;
+    font-weight: bold;
+    padding: 10px 20px;
+}
+
+QPushButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #007c8a, stop:1 #00414a);
+    box-shadow: 0 0 15px rgba(0, 255, 255, 150);
+}
+
+QPushButton:pressed {
+    background: #002d33;
+}
