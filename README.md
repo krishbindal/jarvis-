@@ -22,7 +22,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Key packages: `PySide6`, `sounddevice`, `numpy`.
+Key packages: `PySide6`, `sounddevice`, `numpy`, `pygame`.
 
 ## Running
 Ensure a microphone is available, then:
@@ -32,17 +32,12 @@ python main.py
 ```
 
 - Wait for a **double clap** to trigger startup.
-- A rising tone plays (swap in any Iron Man theme locally if desired), then the PySide6 HUD opens.
+- The startup MP3 (`assets/sounds/startup.mp3`) plays with pygame, then the PySide6 HUD opens. If the file is missing, the app will continue without audio.
 
 If you want to bypass clap activation (e.g., during development), instantiate `JarvisApp(auto_start=True)` in `main.py`.
 
 ## Customizing the Startup Sound
-Replace the generated tone in `core/startup.py` with a path-based player if you have a local track:
-
-```python
-# inside play_startup_sound
-sd.play(soundfile.read("path/to/ironman_theme.wav")[0], samplerate=44100, blocking=True)
-```
+Place your track at `assets/sounds/startup.mp3`. Playback is blocking to keep the cinematic sequence intact.
 
 ## Notes
 - Clap detection uses an amplitude threshold; if your environment is noisy, tune `clap_threshold`, `max_gap_s`, and `cooldown_s` in `triggers/clap_detector.py`.
