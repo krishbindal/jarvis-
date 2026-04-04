@@ -33,6 +33,7 @@ python main.py
 
 - Wait for a **double clap** to trigger startup.
 - The startup MP3 (`assets/sounds/startup.mp3`) plays with pygame, then the PySide6 HUD opens. If the file is missing, the app will continue without audio.
+- After wake, Jarvis briefly listens for a voice command using `speech_recognition` (say "Jarvis open Chrome" or speak directly). If nothing is captured, just type in the UI as before.
 - The UI now uses a dark Jarvis HUD with neon accents, a circular animation, command log panel, and status banner.
 - Commands typed into the UI emit `command_received` events; the core routes them and emits `command_result` back to the log.
 
