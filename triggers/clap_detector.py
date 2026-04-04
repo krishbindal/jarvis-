@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Audio-based double-clap detector with ambient calibration."""
+
 import threading
 import time
 from typing import Callable, Optional
@@ -7,7 +9,9 @@ from typing import Callable, Optional
 import numpy as np
 import sounddevice as sd
 
+import config
 from utils import EventBus
+
 
 class ClapDetector:
     """Listens to the microphone and triggers on a double clap."""
@@ -19,11 +23,11 @@ class ClapDetector:
         event_name: str = "jarvis_wake",
         sample_rate: int = 44_100,
         chunk_size: int = 2_048,
-        clap_threshold: float = 0.35,
-        min_gap_s: float = 0.5,
-        max_gap_s: float = 1.0,
-        cooldown_s: float = 2.5,
-        calibration_seconds: float = 2.0,
+        clap_threshold: float = config.CLAP_THRESHOLD,
+        min_gap_s: float = config.CLAP_MIN_GAP_S,
+        max_gap_s: float = config.CLAP_MAX_GAP_S,
+        cooldown_s: float = config.CLAP_COOLDOWN_S,
+        calibration_seconds: float = config.CLAP_CALIBRATION_S,
         device: Optional[int] = None,
     ) -> None:
         self.on_double_clap = on_double_clap
