@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+import json
 from typing import Optional
 
 from core.action_registry import ACTION_REGISTRY, execute_action
@@ -90,6 +91,13 @@ class JarvisApp:
                 ai_result = interpret_command(text, history=history_entries, relevant=relevant_entries)
                 steps = ai_result.get("steps") or []
                 if steps:
+                    validated = self._validate_ai_steps(steps)
+                    if "error" in validated:
+                        final_result = {"action": "ai_validation_error", "message": validated["error"], "type": "ai"}
+                        self._events.emit("command_result", final_result)
+                        interaction_steps = []
+                        return
+                    steps = validated["steps"]
                     step_results = []
                     previous = None
                     for step in steps:
@@ -150,6 +158,30 @@ class JarvisApp:
         if not action:
             return {"success": False, "status": "error", "message": "Missing action"}
         return execute_action(action, target, extra, previous_result=previous_result)
+
+    def _validate_ai_steps(self, steps: list[dict]) -> dict:
+        if not isinstance(steps, list):
+            return {"error": "Invalid steps format"}
+        deduped = []
+        seen = set()
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            action = (step.get("action") or "").strip()
+            target = step.get("target") or ""
+            extra = step.get("extra") or {}
+            if not action:
+                return {"error": "Step missing action"}
+            if action not in ACTION_REGISTRY:
+                return {"error": f"Unsupported action: {action}"}
+            key = (action, target, json.dumps(extra, sort_keys=True, default=str))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append({"action": action, "target": target, "extra": extra})
+        if not deduped:
+            return {"error": "No valid steps"}
+        return {"steps": deduped}
 
     def _shutdown(self) -> None:
         try:
