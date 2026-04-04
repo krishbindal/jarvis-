@@ -14,16 +14,15 @@ from utils.logger import get_logger
 from utils.system_context import get_system_stats
 from brain.vision_provider import get_visual_context
 from brain.ai_engine import query_ai
-from core.event_bus import get_bus
 
 logger = get_logger("jarvis.proactive")
 
 class ProactiveEngine:
-    def __init__(self, interval_seconds: int = 60):
+    def __init__(self, event_bus, interval_seconds: int = 60):
         self._interval = interval_seconds
         self._running = False
         self._thread: Optional[threading.Thread] = None
-        self._bus = get_bus()
+        self._bus = event_bus
 
     def start(self):
         if self._running:
@@ -79,8 +78,10 @@ class ProactiveEngine:
 
 _engine: Optional[ProactiveEngine] = None
 
-def get_proactive_engine() -> ProactiveEngine:
+def get_proactive_engine(event_bus=None) -> ProactiveEngine:
     global _engine
     if _engine is None:
-        _engine = ProactiveEngine()
+        if event_bus is None:
+            raise ValueError("event_bus must be provided for initial setup of ProactiveEngine")
+        _engine = ProactiveEngine(event_bus)
     return _engine

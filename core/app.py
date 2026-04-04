@@ -474,7 +474,7 @@ class JarvisApp:
 
     def _start_proactive_loop(self) -> None:
         """Start the background proactivity loop using ProactiveEngine."""
-        get_proactive_engine().start()
+        get_proactive_engine(self._events).start()
 
 
     # ─── Shutdown ────────────────────────────────────────────
