@@ -6,6 +6,7 @@ import time
 from core.startup import play_startup_sound
 from triggers.clap_detector import ClapDetector
 from ui.application import launch_ui
+from utils import EventBus
 
 
 class JarvisApp:
@@ -14,7 +15,9 @@ class JarvisApp:
     def __init__(self, auto_start: bool = False) -> None:
         self.auto_start = auto_start
         self._activation_event = threading.Event()
-        self._clap_detector = ClapDetector(on_double_clap=self._handle_activation)
+        self._events = EventBus()
+        self._events.subscribe("jarvis_wake", self._handle_activation)
+        self._clap_detector = ClapDetector(event_bus=self._events)
 
     def _handle_activation(self) -> None:
         if self._activation_event.is_set():

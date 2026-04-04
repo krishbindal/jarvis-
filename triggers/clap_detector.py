@@ -7,6 +7,7 @@ from typing import Callable, Optional
 import numpy as np
 import sounddevice as sd
 
+from utils import EventBus
 
 class ClapDetector:
     """Listens to the microphone and triggers on a double clap."""
@@ -14,6 +15,8 @@ class ClapDetector:
     def __init__(
         self,
         on_double_clap: Optional[Callable[[], None]] = None,
+        event_bus: Optional[EventBus] = None,
+        event_name: str = "jarvis_wake",
         sample_rate: int = 44_100,
         chunk_size: int = 2_048,
         clap_threshold: float = 0.35,
@@ -24,6 +27,8 @@ class ClapDetector:
         device: Optional[int] = None,
     ) -> None:
         self.on_double_clap = on_double_clap
+        self.event_bus = event_bus
+        self.event_name = event_name
         self.sample_rate = sample_rate
         self.chunk_size = chunk_size
         self.clap_threshold = clap_threshold
@@ -143,6 +148,8 @@ class ClapDetector:
         self._last_trigger_ts = ts
         print(f"Double clap detected (gap {delta:.2f}s).")
         self._above_threshold = True
+        if self.event_bus:
+            self.event_bus.emit(self.event_name)
         if self.on_double_clap:
             try:
                 self.on_double_clap()
