@@ -11,6 +11,7 @@ SAFE_DIRECTORIES = [
     "C:/Users",
     "D:/Projects",
     "~/Downloads",
+    "~/Documents",
 ]
 
 
@@ -36,20 +37,40 @@ def _safe_path(raw: str) -> Path:
     return resolved
 
 
+def _default_dir() -> Path:
+    candidates = [
+        Path("~/Downloads").expanduser(),
+        Path("~/Documents").expanduser(),
+        Path(".").resolve(),
+    ]
+    for cand in candidates:
+        try:
+            if cand.exists():
+                resolved = cand.resolve()
+                if _is_safe(resolved):
+                    return resolved
+        except Exception:
+            continue
+    return Path(".").resolve()
+
+
 def list_files(path: str) -> Dict:
     try:
-        target = _safe_path(path or ".")
+        target_path = path or str(_default_dir())
+        target = _safe_path(target_path)
         if not target.exists() or not target.is_dir():
             return {"success": False, "message": f"Not a directory: {target}"}
         items = sorted([p.name for p in target.iterdir()])
-        return {"success": True, "message": f"Found {len(items)} items in {target}", "data": items}
+        preview = ", ".join(items[:5])
+        suffix = "" if not preview else f": {preview}"
+        return {"success": True, "message": f"Found {len(items)} items in {target}{suffix}", "data": items}
     except Exception as exc:  # noqa: BLE001
         return {"success": False, "message": str(exc)}
 
 
 def create_folder(name: str, path: str | None = None) -> Dict:
     try:
-        base = _safe_path(path or ".")
+        base = _safe_path(path or str(_default_dir()))
         target = (base / name).resolve()
         if not _is_safe(target):
             raise ValueError(f"Path not allowed: {target}")
@@ -110,14 +131,16 @@ def rename_file(path: str, new_name: str) -> Dict:
 
 def search_file(name: str, root_path: str) -> Dict:
     try:
-        root = _safe_path(root_path or ".")
+        root = _safe_path(root_path or str(_default_dir()))
         matches: List[str] = []
         for entry in root.rglob(name):
             if entry.is_file() and _is_safe(entry):
                 matches.append(str(entry))
             if len(matches) >= 25:
                 break
-        return {"success": True, "message": f"Found {len(matches)} match(es)", "data": matches}
+        preview = ", ".join([Path(m).name for m in matches[:5]])
+        suffix = "" if not preview else f": {preview}"
+        return {"success": True, "message": f"Found {len(matches)} match(es){suffix}", "data": matches}
     except Exception as exc:  # noqa: BLE001
         return {"success": False, "message": str(exc)}
 
