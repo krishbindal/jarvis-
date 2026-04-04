@@ -3,7 +3,10 @@ from __future__ import annotations
 """File system executor with safety checks."""
 
 import os
+import platform
 import shutil
+import subprocess
+import webbrowser
 from pathlib import Path
 from typing import Dict, List
 
@@ -50,6 +53,72 @@ def _default_dir() -> Path:
         except Exception:
             continue
     return Path(".").resolve()
+
+
+def open_app(target: str) -> Dict:
+    if not target:
+        return {"success": False, "status": "error", "message": "No application specified"}
+    try:
+        logger.info("Opening application: %s", target)
+        system = platform.system().lower()
+        if system == "windows":
+            subprocess.Popen(["start", "", target], shell=True)
+        elif system == "darwin":
+            subprocess.Popen(["open", "-a", target])
+        else:
+            subprocess.Popen([target])
+        return {"success": True, "status": "success", "message": f"Launched {target}", "output": target}
+    except FileNotFoundError:
+        logger.error("Application not found: %s", target)
+        return {"success": False, "status": "error", "message": f"Application not found: {target}"}
+    except Exception as exc:  # noqa: BLE001
+        logger.error("open_app failed: %s", exc)
+        return {"success": False, "status": "error", "message": str(exc)}
+
+
+def open_url(url: str) -> Dict:
+    try:
+        webbrowser.open(url, new=2, autoraise=True)
+        logger.info("Opening URL: %s", url)
+        return {"success": True, "status": "success", "message": f"Opened {url}", "output": url}
+    except Exception as exc:  # noqa: BLE001
+        logger.error("open_url failed for %s: %s", url, exc)
+        return {"success": False, "status": "error", "message": f"Failed to open {url}: {exc}"}
+
+
+def media_control(target: str) -> Dict:
+    # Placeholder: real media controls are platform-specific; here we acknowledge the request.
+    logger.info("Media control requested: %s", target)
+    return {"success": True, "status": "success", "message": f"Media control: {target}", "output": target}
+
+
+def power_state(target: str) -> Dict:
+    logger.info("Power state request: %s", target)
+    return {"success": True, "status": "success", "message": f"Power state change requested: {target}", "output": target}
+
+
+def capture_screen(_: str = "") -> Dict:
+    try:
+        import pyautogui
+
+        output_dir = Path("assets/memory")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        dest = output_dir / "last_screen.png"
+        screenshot = pyautogui.screenshot()
+        screenshot.save(dest)
+        logger.info("Captured screen to %s", dest)
+        return {"success": True, "status": "success", "message": "Screen captured", "output": str(dest)}
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Screen capture failed: %s", exc)
+        return {"success": False, "status": "error", "message": f"Screen capture failed: {exc}"}
+
+
+def quick_search(query: str) -> Dict:
+    if not query:
+        return {"success": False, "status": "error", "message": "No search query provided"}
+    url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
+    logger.info("Quick search: %s", query)
+    return open_url(url)
 
 
 def list_files(path: str) -> Dict:

@@ -21,6 +21,7 @@ from executor.system_executor import (
     power_state,
     capture_screen,
     quick_search,
+    open_url,
 )
 
 ACTION_REGISTRY = {
@@ -42,6 +43,7 @@ ACTION_REGISTRY = {
     "power_state": power_state,
     "capture_screen": capture_screen,
     "quick_search": quick_search,
+    "open_url": open_url,
 }
 
 

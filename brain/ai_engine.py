@@ -2,14 +2,15 @@ from __future__ import annotations
 
 """AI engine using Ollama as a fallback command interpreter."""
 
-import json
 import base64
+import json
 import os
 from typing import Any, Dict, Iterable
 
 import requests
+import config
 from utils.logger import get_logger
-from config import MODEL_NAME
+from config import MODEL_NAME, REMOTE_MODEL_NAME, REMOTE_AI_TIMEOUT, AI_COMPLEXITY_THRESHOLD, REQUEST_TIMEOUT
 from utils.system_context import get_system_stats
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
@@ -54,6 +55,45 @@ Respond ONLY in JSON:
 "message": "A brief, natural language confirmation of what you are doing."
 }
 """
+
+def _should_use_remote(user_input: str) -> bool:
+    tokens = user_input.split()
+    return len(tokens) > 12 or any(marker in user_input.lower() for marker in ("research", "explain", "why", "how"))
+
+
+def _call_local_model(payload: Dict[str, Any]) -> Dict[str, Any]:
+    resp = requests.post(OLLAMA_URL, json=payload, timeout=REQUEST_TIMEOUT)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _call_remote_model(prompt: str) -> Dict[str, Any]:
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise RuntimeError("No remote AI key configured")
+
+    headers = {"Content-Type": "application/json"}
+    url = os.getenv("GEMINI_API_URL") or f"https://generativelanguage.googleapis.com/v1beta/models/{REMOTE_MODEL_NAME}:generateContent"
+    params = {}
+    if "OPENROUTER_API_KEY" in os.environ:
+        headers["Authorization"] = f"Bearer {api_key}"
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        payload = {"model": REMOTE_MODEL_NAME, "messages": [{"role": "user", "content": prompt}], "stream": False}
+        resp = requests.post(url, headers=headers, json=payload, timeout=REMOTE_AI_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return {"response": content}
+
+    headers["x-goog-api-key"] = api_key
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    resp = requests.post(url, headers=headers, params=params, json=payload, timeout=REMOTE_AI_TIMEOUT)
+    resp.raise_for_status()
+    data = resp.json()
+    candidates = data.get("candidates", [])
+    if not candidates:
+        return {"response": ""}
+    return {"response": candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")}
 
 
 def _safe_json_extract(text: str) -> Dict[str, Any]:
@@ -159,14 +199,16 @@ def describe_screen(prompt: str = "What is on the screen?") -> str:
 def interpret_command(
     user_input: str, history: Iterable[Dict[str, Any]] | None = None, relevant: Iterable[Dict[str, Any]] | None = None
 ) -> Dict[str, Any]:
+    history_list = list(history or [])[-config.MAX_HISTORY_ENTRIES :]
+    relevant_list = list(relevant or [])[-config.MAX_RELEVANT_ENTRIES :]
     stats = get_system_stats()
     sys_context = f"\nSYSTEM PERFORMANCE: CPU {stats['cpu_percent']}%, RAM {stats['memory_percent']}%"
     if stats['battery_percent'] is not None:
         sys_context += f", Battery {stats['battery_percent']}%"
     sys_context += f"\nACTIVE WINDOW: {stats['active_window']}"
 
-    history_text = _format_history(history)
-    relevant_text = _format_relevant(relevant)
+    history_text = _format_history(history_list)
+    relevant_text = _format_relevant(relevant_list)
     
     # If the user asks "what's on my screen" or "explain this screen", 
     # we should handle it specifically or inform the AI it can 'see'.
@@ -181,12 +223,23 @@ def interpret_command(
         "stream": False,
     }
     try:
-        logger.info("Sending prompt to AI model")
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=20)
-        resp.raise_for_status()
-        data = resp.json()
-        output = data.get("response", "") or data.get("generated_text", "")
-        parsed = _safe_json_extract(output)
+        logger.info("[AI] Sending prompt to local model")
+        prefer_remote = _should_use_remote(user_input) or (len(user_input.split()) / 10) >= AI_COMPLEXITY_THRESHOLD
+        output_text = ""
+
+        if prefer_remote:
+            try:
+                logger.info("[AI] Remote model preferred for complex query")
+                remote_data = _call_remote_model(payload["prompt"])
+                output_text = remote_data.get("response", "")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[AI] Remote model unavailable, falling back to local: %s", exc)
+
+        if not output_text:
+            data = _call_local_model(payload)
+            output_text = data.get("response", "") or data.get("generated_text", "")
+
+        parsed = _safe_json_extract(output_text)
         validated = _validate_steps(parsed)
         return validated
     except Exception as exc:  # noqa: BLE001

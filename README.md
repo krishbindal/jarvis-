@@ -12,6 +12,8 @@ Local, offline-first desktop assistant scaffolded for Windows using Python, PySi
 - `utils/` – shared helpers
 - `main.py` – entrypoint
 - `requirements.txt` – runtime dependencies
+- `skills/` – modular skill plugins loaded dynamically
+- `macros.json` – reusable command macros (e.g., `study mode`)
 
 ## Dependencies
 Install with Python 3.10+:
@@ -38,6 +40,13 @@ python main.py
 - Commands typed into the UI emit `command_received` events; the core routes them and emits `command_result` back to the log.
 
 If you want to bypass clap activation (e.g., during development), instantiate `JarvisApp(auto_start=True)` in `main.py`.
+
+## New capabilities
+- Wake-word gating (`Jarvis`) with an intent engine and confidence scoring before AI.
+- Response cache for repeat commands plus skills loaded from `skills/`.
+- Macros/workflows stored in `macros.json` and `memory/workflows.json`; multi-step sequences are recorded for reuse.
+- Hybrid AI routing prefers local Ollama for simple tasks and falls back to remote (Gemini/OpenRouter) when configured.
+- Background agent surfaces frequent actions as suggestions; structured logs tag `[VOICE]`, `[ROUTER]`, `[AI]`, and `[EXECUTOR]`.
 
 ## Customizing the Startup Sound
 Place your track at `assets/sounds/startup.mp3`. Playback is blocking to keep the cinematic sequence intact.

@@ -1,0 +1,12 @@
+{
+  "macros": {
+    "study mode": [
+      "open chrome",
+      "open notes"
+    ],
+    "daily start": [
+      "list files",
+      "open chrome"
+    ]
+  }
+}
