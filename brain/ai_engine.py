@@ -12,7 +12,7 @@ MODEL = "llama3"
 
 SYSTEM_PROMPT = """
 You are Jarvis AI.
-Convert user input into JSON command.
+Convert user input into a JSON list of steps.
 
 Available actions:
 * open_app
@@ -32,9 +32,9 @@ Available actions:
 
 Respond ONLY in JSON:
 {
-"action": "...",
-"target": "...",
-"extra": {}
+"steps": [
+  { "action": "...", "target": "...", "extra": {} }
+]
 }
 """
 
@@ -48,7 +48,22 @@ def _safe_json_extract(text: str) -> Dict[str, Any]:
         snippet = text[start : end + 1]
         return json.loads(snippet)
     except Exception:
-        return {"action": "unknown", "target": "", "extra": {}, "type": "system", "message": "AI parsing failed"}
+        return {"steps": [], "type": "ai", "message": "AI parsing failed"}
+
+
+def _validate_steps(data: Dict[str, Any]) -> Dict[str, Any]:
+    steps = data.get("steps", [])
+    if not isinstance(steps, list):
+        return {"steps": [], "type": "ai", "message": "AI parsing failed"}
+    cleaned = []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        action = step.get("action") or "unknown"
+        target = step.get("target") or ""
+        extra = step.get("extra") or {}
+        cleaned.append({"action": action, "target": target, "extra": extra})
+    return {"steps": cleaned, "type": "ai"}
 
 
 def interpret_command(user_input: str) -> Dict[str, Any]:
@@ -63,8 +78,7 @@ def interpret_command(user_input: str) -> Dict[str, Any]:
         data = resp.json()
         output = data.get("response", "") or data.get("generated_text", "")
         parsed = _safe_json_extract(output)
-        if "type" not in parsed:
-            parsed["type"] = "ai"
-        return parsed
+        validated = _validate_steps(parsed)
+        return validated
     except Exception as exc:  # noqa: BLE001
-        return {"action": "unknown", "target": "", "extra": {}, "type": "system", "message": f"AI failed: {exc}"}
+        return {"steps": [], "type": "ai", "message": f"AI failed: {exc}"}
