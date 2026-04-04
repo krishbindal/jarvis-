@@ -7,6 +7,9 @@ CLAP_MAX_GAP_S = 1.0
 CLAP_COOLDOWN_S = 2.5
 CLAP_CALIBRATION_S = 2.0
 
+# Voice
+VOICE_MODEL_PATH = "voice/model"
+
 # Integrations and execution
 N8N_WEBHOOK_URL = "https://your-n8n-url/webhook/jarvis"
 SAFE_DIRECTORIES = ["C:/Users", "~/Downloads"]

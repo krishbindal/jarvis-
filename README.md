@@ -22,7 +22,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Key packages: `PySide6`, `sounddevice`, `numpy`, `pygame`.
+Key packages: `PySide6`, `sounddevice`, `numpy`, `pygame`, `vosk` (offline ASR).
 
 ## Running
 Ensure a microphone is available, then:
@@ -33,6 +33,7 @@ python main.py
 
 - Wait for a **double clap** to trigger startup.
 - The startup MP3 (`assets/sounds/startup.mp3`) plays with pygame, then the PySide6 HUD opens. If the file is missing, the app will continue without audio.
+- After wake, Jarvis briefly listens for a voice command using Vosk (offline). Place a model at `voice/model` (or set `VOICE_MODEL_PATH` in `config.py`). If nothing is captured, just type in the UI as before.
 - The UI now uses a dark Jarvis HUD with neon accents, a circular animation, command log panel, and status banner.
 - Commands typed into the UI emit `command_received` events; the core routes them and emits `command_result` back to the log.
 
