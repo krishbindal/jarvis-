@@ -14,22 +14,22 @@ SYSTEM_PROMPT = """
 You are Jarvis AI.
 Convert user input into a JSON list of steps. You may refer to previous outputs in next steps. Relevant past actions may be provided to help you plan.
 
-Available actions:
+Available tools:
+* list_files: list files in a directory
+* create_folder: create a new folder
+* delete_file: delete a file safely
+* move_file: move file from source to destination
+* copy_file: copy file
+* rename_file: rename file
+* search_file: search files recursively
+* file_info: get file details
+* download_file: download file from URL
+* download_video: download video from URL
+* convert_to_mp3: convert file to mp3
+* convert_to_pdf: convert file to pdf
+* trigger_n8n: run external workflow
 * open_app
 * open_url
-* list_files
-* create_folder
-* delete_file
-* move_file
-* copy_file
-* rename_file
-* search_file
-* file_info
-* download_file
-* download_video
-* convert_to_mp3
-* convert_to_pdf
-* trigger_n8n
 
 Respond ONLY in JSON:
 {
