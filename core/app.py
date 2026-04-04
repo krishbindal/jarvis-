@@ -4,19 +4,20 @@ from __future__ import annotations
 
 import threading
 import time
+import json
 from typing import Optional
 
+from core.action_registry import ACTION_REGISTRY, execute_action
 from core.command_router import route_command
 from core.startup import start_startup_sequence
-from executor.download_executor import download_file, download_video
-from executor.conversion_executor import execute_conversion
-from executor.system_executor import execute_file_command
-from executor.n8n_executor import trigger_workflow
 from memory.memory_store import get_recent_history, get_relevant_context, save_interaction
 from triggers.clap_detector import ClapDetector
 from ui.application import launch_ui
+from utils.logger import get_logger
 from utils import EventBus
 from brain.ai_engine import interpret_command
+
+logger = get_logger(__name__)
 
 
 class JarvisApp:
@@ -35,7 +36,7 @@ class JarvisApp:
     def _handle_activation(self) -> None:
         if self._activation_event.is_set():
             return
-        print("Double clap detected. Preparing cinematic startup...")
+        logger.info("Double clap detected. Preparing cinematic startup...")
         self._activation_event.set()
         self._clap_detector.stop()
 
@@ -44,7 +45,7 @@ class JarvisApp:
             try:
                 self._clap_detector.start()
             except Exception as exc:  # noqa: BLE001
-                print(f"Clap detector failed: {exc}")
+                logger.error("Clap detector failed: %s", exc)
 
         self._listener_thread = threading.Thread(target=_runner, name="clap-listener", daemon=True)
         self._listener_thread.start()
@@ -55,13 +56,13 @@ class JarvisApp:
             if self.auto_start:
                 self._activation_event.set()
             else:
-                print("Listening for a double clap to start JARVIS-X...")
+                logger.info("Listening for a double clap to start JARVIS-X...")
                 self._start_clap_listener()
 
             self._activation_event.wait()
             self._start_cinematic_sequence()
         except KeyboardInterrupt:
-            print("Shutting down...")
+            logger.info("Shutting down...")
         finally:
             self._shutdown()
 
@@ -71,17 +72,18 @@ class JarvisApp:
         try:
             launch_ui(self._events)
         except Exception as exc:  # noqa: BLE001
-            print(f"UI launch failed: {exc}")
+            logger.error("UI launch failed: %s", exc)
         if audio_thread and audio_thread.is_alive():
             audio_thread.join(timeout=0)
         end_ts = time.monotonic()
-        print(f"Cinematic startup completed in {end_ts - start_ts:.2f}s")
+        logger.info("Cinematic startup completed in %.2fs", end_ts - start_ts)
 
     def _handle_command(self, payload: dict) -> None:
         interaction_steps = []
         final_result = None
         try:
             text = payload.get("text", "")
+            logger.info("Received command: %s", text)
             result = route_command(text)
             if result.get("action") == "unknown":
                 history_entries = get_recent_history()
@@ -89,6 +91,13 @@ class JarvisApp:
                 ai_result = interpret_command(text, history=history_entries, relevant=relevant_entries)
                 steps = ai_result.get("steps") or []
                 if steps:
+                    validated = self._validate_ai_steps(steps)
+                    if "error" in validated:
+                        final_result = {"action": "ai_validation_error", "message": validated["error"], "type": "ai"}
+                        self._events.emit("command_result", final_result)
+                        interaction_steps = []
+                        return
+                    steps = validated["steps"]
                     step_results = []
                     previous = None
                     for step in steps:
@@ -113,57 +122,19 @@ class JarvisApp:
                 else:
                     result = {"action": "unknown", "target": "", "message": ai_result.get("message", "No AI result"), "type": "ai"}
 
-            if result.get("type") == "file":
-                exec_result = execute_file_command(result.get("action", ""), result.get("target", ""), result.get("extra", {}))
+            action = result.get("action", "")
+            target = result.get("target", "")
+            extra = result.get("extra", {})
+
+            if action in ACTION_REGISTRY:
+                logger.info("Executing action: %s target=%s", action, target)
+                exec_result = execute_action(action, target, extra)
                 result["exec_result"] = exec_result
                 result["message"] = exec_result.get("message", result.get("message", ""))
                 interaction_steps = [
                     {
-                        "action": result.get("action", ""),
-                        "target": result.get("target", ""),
-                        "status": exec_result.get("status"),
-                        "output": exec_result.get("output"),
-                        "message": exec_result.get("message"),
-                    }
-                ]
-            elif result.get("type") == "network":
-                action = result.get("action", "")
-                if action == "download_video":
-                    exec_result = download_video(result.get("target", ""))
-                else:
-                    exec_result = download_file(result.get("target", ""))
-                result["exec_result"] = exec_result
-                result["message"] = exec_result.get("message", result.get("message", ""))
-                interaction_steps = [
-                    {
-                        "action": result.get("action", ""),
-                        "target": result.get("target", ""),
-                        "status": exec_result.get("status"),
-                        "output": exec_result.get("output"),
-                        "message": exec_result.get("message"),
-                    }
-                ]
-            elif result.get("type") == "conversion":
-                exec_result = execute_conversion(result.get("action", ""), result.get("target", ""))
-                result["exec_result"] = exec_result
-                result["message"] = exec_result.get("message", result.get("message", ""))
-                interaction_steps = [
-                    {
-                        "action": result.get("action", ""),
-                        "target": result.get("target", ""),
-                        "status": exec_result.get("status"),
-                        "output": exec_result.get("output"),
-                        "message": exec_result.get("message"),
-                    }
-                ]
-            elif result.get("type") == "n8n":
-                exec_result = trigger_workflow(result.get("target", ""), result.get("extra", {}))
-                result["exec_result"] = exec_result
-                result["message"] = exec_result.get("message", result.get("message", ""))
-                interaction_steps = [
-                    {
-                        "action": result.get("action", ""),
-                        "target": result.get("target", ""),
+                        "action": action,
+                        "target": target,
                         "status": exec_result.get("status"),
                         "output": exec_result.get("output"),
                         "message": exec_result.get("message"),
@@ -173,12 +144,12 @@ class JarvisApp:
             final_result = result
         except Exception as exc:  # noqa: BLE001
             final_result = {"action": "error", "message": str(exc), "type": "error"}
-            print(f"Command handling failed: {exc}")
+            logger.error("Command handling failed: %s", exc)
         finally:
             try:
                 save_interaction(payload.get("text", ""), interaction_steps, final_result or {})
             except Exception as exc:  # noqa: BLE001
-                print(f"Memory persistence failed: {exc}")
+                logger.error("Memory persistence failed: %s", exc)
 
     def _execute_step(self, step: dict, previous_result: Optional[dict] = None) -> dict:
         action = step.get("action", "")
@@ -186,29 +157,31 @@ class JarvisApp:
         extra = step.get("extra", {})
         if not action:
             return {"success": False, "status": "error", "message": "Missing action"}
-        if action in ("download_file",):
-            return download_file(target)
-        if action in ("download_video",):
-            return download_video(target)
-        if action in ("convert_to_mp3", "convert_to_pdf"):
-            return execute_conversion(action, target)
-        if action in (
-            "list_files",
-            "create_folder",
-            "delete_file",
-            "move_file",
-            "copy_file",
-            "rename_file",
-            "search_file",
-            "file_info",
-        ):
-            return execute_file_command(action, target, extra)
-        if action == "trigger_n8n":
-            data = dict(extra or {})
-            if previous_result and "previous_output" not in data:
-                data["previous_output"] = previous_result.get("output", previous_result)
-            return trigger_workflow(target or action, data)
-        return {"success": False, "message": f"Unsupported action: {action}"}
+        return execute_action(action, target, extra, previous_result=previous_result)
+
+    def _validate_ai_steps(self, steps: list[dict]) -> dict:
+        if not isinstance(steps, list):
+            return {"error": "Invalid steps format"}
+        deduped = []
+        seen = set()
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            action = (step.get("action") or "").strip()
+            target = step.get("target") or ""
+            extra = step.get("extra") or {}
+            if not action:
+                return {"error": "Step missing action"}
+            if action not in ACTION_REGISTRY:
+                return {"error": f"Unsupported action: {action}"}
+            key = (action, target, json.dumps(extra, sort_keys=True, default=str))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append({"action": action, "target": target, "extra": extra})
+        if not deduped:
+            return {"error": "No valid steps"}
+        return {"steps": deduped}
 
     def _shutdown(self) -> None:
         try:
