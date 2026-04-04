@@ -93,7 +93,7 @@ class JarvisApp:
         self._researcher = DeepResearchAgent(event_bus=self._events)
         
         # Phase 26: Sentinel Fixer (Self-Healing)
-        self._sentinel = SentinelFixer()
+        self._sentinel = SentinelFixer(event_bus=self._events)
         
         # Database for stats
         self._db = MemoryDB()
