@@ -80,14 +80,29 @@ class JarvisApp:
             result = route_command(text)
             if result.get("action") == "unknown":
                 ai_result = interpret_command(text)
-                if ai_result.get("action") and ai_result.get("action") != "unknown":
-                    result = ai_result
+                steps = ai_result.get("steps") or []
+                if steps:
+                    step_results = []
+                    for step in steps:
+                        exec_res = self._execute_step(step)
+                        step_results.append(exec_res)
+                        if not exec_res.get("success", True) and self.stop_on_error:
+                            break
+                    self._events.emit("command_result", {"steps": step_results, "type": "ai"})
+                    return
+                else:
+                    result = {"action": "unknown", "target": "", "message": ai_result.get("message", "No AI result"), "type": "ai"}
+
             if result.get("type") == "file":
                 exec_result = execute_file_command(result.get("action", ""), result.get("target", ""), result.get("extra", {}))
                 result["exec_result"] = exec_result
                 result["message"] = exec_result.get("message", result.get("message", ""))
             elif result.get("type") == "network":
-                exec_result = download_file(result.get("target", ""))
+                action = result.get("action", "")
+                if action == "download_video":
+                    exec_result = download_video(result.get("target", ""))
+                else:
+                    exec_result = download_file(result.get("target", ""))
                 result["exec_result"] = exec_result
                 result["message"] = exec_result.get("message", result.get("message", ""))
             elif result.get("type") == "conversion":
@@ -97,6 +112,31 @@ class JarvisApp:
             self._events.emit("command_result", result)
         except Exception as exc:  # noqa: BLE001
             print(f"Command handling failed: {exc}")
+
+    def _execute_step(self, step: dict) -> dict:
+        action = step.get("action", "")
+        target = step.get("target", "")
+        extra = step.get("extra", {})
+        if not action:
+            return {"success": False, "message": "Missing action"}
+        if action in ("download_file",):
+            return download_file(target)
+        if action in ("download_video",):
+            return download_video(target)
+        if action in ("convert_to_mp3", "convert_to_pdf"):
+            return execute_conversion(action, target)
+        if action in (
+            "list_files",
+            "create_folder",
+            "delete_file",
+            "move_file",
+            "copy_file",
+            "rename_file",
+            "search_file",
+            "file_info",
+        ):
+            return execute_file_command(action, target, extra)
+        return {"success": False, "message": f"Unsupported action: {action}"}
 
     def _shutdown(self) -> None:
         try:
