@@ -7,12 +7,10 @@ import shutil
 from pathlib import Path
 from typing import Dict, List
 
-SAFE_DIRECTORIES = [
-    "C:/Users",
-    "D:/Projects",
-    "~/Downloads",
-    "~/Documents",
-]
+from config import SAFE_DIRECTORIES
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def _allowed_roots() -> List[Path]:
@@ -60,6 +58,7 @@ def list_files(path: str) -> Dict:
         target = _safe_path(target_path)
         if not target.exists() or not target.is_dir():
             return {"success": False, "status": "error", "message": f"Not a directory: {target}"}
+        logger.info("Listing files in %s", target)
         items = sorted([p.name for p in target.iterdir()])
         preview = ", ".join(items[:5])
         suffix = "" if not preview else f": {preview}"
@@ -81,8 +80,10 @@ def create_folder(name: str, path: str | None = None) -> Dict:
         if not _is_safe(target):
             raise ValueError(f"Path not allowed: {target}")
         target.mkdir(parents=True, exist_ok=True)
+        logger.info("Folder ensured at %s", target)
         return {"success": True, "status": "success", "message": f"Folder ensured at {target}", "output": str(target)}
     except Exception as exc:  # noqa: BLE001
+        logger.error("Create folder failed for %s in %s: %s", name, path, exc)
         return {"success": False, "status": "error", "message": str(exc)}
 
 
@@ -94,8 +95,10 @@ def delete_file(path: str) -> Dict:
         if target.is_dir():
             return {"success": False, "status": "error", "message": "Refusing to delete directory."}
         target.unlink()
+        logger.info("Deleted file %s", target)
         return {"success": True, "status": "success", "message": f"Deleted {target}", "output": str(target)}
     except Exception as exc:  # noqa: BLE001
+        logger.error("Delete file failed for %s: %s", path, exc)
         return {"success": False, "status": "error", "message": str(exc)}
 
 
@@ -106,8 +109,10 @@ def move_file(src: str, dest: str) -> Dict:
         if dest_path.is_dir():
             dest_path = dest_path / source_path.name
         shutil.move(str(source_path), str(dest_path))
+        logger.info("Moved %s to %s", source_path, dest_path)
         return {"success": True, "status": "success", "message": f"Moved to {dest_path}", "output": str(dest_path)}
     except Exception as exc:  # noqa: BLE001
+        logger.error("Move file failed from %s to %s: %s", src, dest, exc)
         return {"success": False, "status": "error", "message": str(exc)}
 
 
@@ -118,8 +123,10 @@ def copy_file(src: str, dest: str) -> Dict:
         if dest_path.is_dir():
             dest_path = dest_path / source_path.name
         shutil.copy2(str(source_path), str(dest_path))
+        logger.info("Copied %s to %s", source_path, dest_path)
         return {"success": True, "status": "success", "message": f"Copied to {dest_path}", "output": str(dest_path)}
     except Exception as exc:  # noqa: BLE001
+        logger.error("Copy file failed from %s to %s: %s", src, dest, exc)
         return {"success": False, "status": "error", "message": str(exc)}
 
 
@@ -130,6 +137,7 @@ def rename_file(path: str, new_name: str) -> Dict:
         if not _is_safe(dest):
             raise ValueError(f"Path not allowed: {dest}")
         source.rename(dest)
+        logger.info("Renamed %s to %s", source, dest)
         return {
             "success": True,
             "status": "success",
@@ -138,6 +146,7 @@ def rename_file(path: str, new_name: str) -> Dict:
             "output": str(dest),
         }
     except Exception as exc:  # noqa: BLE001
+        logger.error("Rename file failed for %s to %s: %s", path, new_name, exc)
         return {"success": False, "status": "error", "message": str(exc)}
 
 
@@ -150,6 +159,7 @@ def search_file(name: str, root_path: str) -> Dict:
                 matches.append(str(entry))
             if len(matches) >= 25:
                 break
+        logger.info("Search for %s in %s found %d matches", name, root, len(matches))
         preview = ", ".join([Path(m).name for m in matches[:5]])
         suffix = "" if not preview else f": {preview}"
         return {
@@ -176,8 +186,10 @@ def file_info(path: str) -> Dict:
             "is_dir": target.is_dir(),
             "is_file": target.is_file(),
         }
+        logger.info("Retrieved file info for %s", target)
         return {"success": True, "status": "success", "message": "File info retrieved.", "data": info, "output": info}
     except Exception as exc:  # noqa: BLE001
+        logger.error("File info failed for %s: %s", path, exc)
         return {"success": False, "status": "error", "message": str(exc)}
 
 

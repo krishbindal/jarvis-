@@ -6,30 +6,32 @@ import json
 from typing import Any, Dict, Iterable
 
 import requests
+from utils.logger import get_logger
+from config import MODEL_NAME
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "llama3"
+logger = get_logger(__name__)
 
 SYSTEM_PROMPT = """
 You are Jarvis AI.
 Convert user input into a JSON list of steps. You may refer to previous outputs in next steps. Relevant past actions may be provided to help you plan.
 
-Available actions:
+Available tools:
+* list_files: list files in a directory
+* create_folder: create a new folder
+* delete_file: delete a file safely
+* move_file: move file from source to destination
+* copy_file: copy file
+* rename_file: rename file
+* search_file: search files recursively
+* file_info: get file details
+* download_file: download file from URL
+* download_video: download video from URL
+* convert_to_mp3: convert file to mp3
+* convert_to_pdf: convert file to pdf
+* trigger_n8n: run external workflow
 * open_app
 * open_url
-* list_files
-* create_folder
-* delete_file
-* move_file
-* copy_file
-* rename_file
-* search_file
-* file_info
-* download_file
-* download_video
-* convert_to_mp3
-* convert_to_pdf
-* trigger_n8n
 
 Respond ONLY in JSON:
 {
@@ -119,11 +121,12 @@ def interpret_command(
     history_text = _format_history(history)
     relevant_text = _format_relevant(relevant)
     payload = {
-        "model": MODEL,
+        "model": MODEL_NAME,
         "prompt": f"{SYSTEM_PROMPT}\nUser history:\n{history_text}\n\nRelevant past actions:\n{relevant_text}\n\nUser: {user_input}\nAssistant:",
         "stream": False,
     }
     try:
+        logger.info("Sending prompt to AI model")
         resp = requests.post(OLLAMA_URL, json=payload, timeout=15)
         resp.raise_for_status()
         data = resp.json()
@@ -132,4 +135,5 @@ def interpret_command(
         validated = _validate_steps(parsed)
         return validated
     except Exception as exc:  # noqa: BLE001
+        logger.error("AI interpretation failed: %s", exc)
         return {"steps": [], "type": "ai", "message": f"AI failed: {exc}"}
