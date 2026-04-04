@@ -34,7 +34,7 @@ def _phrase_to_regex(phrase: str) -> re.Pattern[str]:
     for field in _PLACEHOLDER_FIELDS:
         pattern = pattern.replace(r"\{" + field + r"\}", rf"(?P<{field}>.+)")
     pattern = pattern.replace(r"\ ", r"\s+")
-    return re.compile(rf"^{pattern}$", re.IGNORECASE)
+    return re.compile(rf"{pattern}", re.IGNORECASE)
 
 
 def _build_file_command(action: str, groups: Dict[str, str]) -> Dict[str, str]:
@@ -170,5 +170,29 @@ def route_command(text: str) -> Dict[str, str]:
         target = generic_app.group(2).strip()
         if target:
             return _build("open_app", target, f"Opening {target}")
+
+    # Media Controls
+    media_match = re.match(r"^(play|pause|stop|next song|previous song|volume up|volume down|mute)$", normalized)
+    if media_match:
+        target = media_match.group(1).replace(" song", "").replace(" ", "_")
+        return _build("media_control", target, f"Executing media control: {target}")
+
+    # Power State
+    power_match = re.match(r"^(lock pc|lock computer|sleep pc|sleep computer|hibernate)$", normalized)
+    if power_match:
+        target = "sleep" if "sleep" in normalized else "lock"
+        return _build("power_state", target, f"Executing power state: {target}")
+
+    # Vision / Screen Capture
+    vision_match = re.match(r"^(capture screen|take screenshot|screenshot|what is on my screen|see my screen)$", normalized)
+    if vision_match:
+        return _build("capture_screen", "", "Capturing screen context")
+
+    # Web Intelligence 
+    search_match = re.match(r"^(search for|search the web for|what is|who is|look up|google)\s+(.+)$", normalized)
+    if search_match:
+        target = search_match.group(2).strip()
+        if target:
+            return _build("quick_search", target, f"Searching web for: {target}")
 
     return _build("unknown", "", "Command not recognized. Try 'open youtube' or 'open folder <path>'.")

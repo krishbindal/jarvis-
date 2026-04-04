@@ -13,10 +13,11 @@ from core.startup import start_startup_sequence
 from memory.memory_store import get_recent_history, get_relevant_context, save_interaction
 from triggers.clap_detector import ClapDetector
 from ui.application import launch_ui
-from voice.voice_input import listen_for_command
+from voice.voice_input import VoiceListener
 from utils.logger import get_logger
 from utils import EventBus
 from brain.ai_engine import interpret_command
+from voice.tts_engine import speak
 
 logger = get_logger(__name__)
 
@@ -32,7 +33,7 @@ class JarvisApp:
         self._events.subscribe("command_received", self._handle_command)
         self._clap_detector = ClapDetector(event_bus=self._events)
         self._listener_thread: Optional[threading.Thread] = None
-        self._voice_thread: Optional[threading.Thread] = None
+        self.voice = VoiceListener(self._events)
         self.stop_on_error: bool = True
 
     def _handle_activation(self) -> None:
@@ -71,7 +72,7 @@ class JarvisApp:
     def _start_cinematic_sequence(self) -> None:
         start_ts = time.monotonic()
         audio_thread = start_startup_sequence()
-        self._start_voice_capture(wait_for=audio_thread)
+        self.voice.start()
         try:
             launch_ui(self._events)
         except Exception as exc:  # noqa: BLE001
@@ -81,36 +82,27 @@ class JarvisApp:
         end_ts = time.monotonic()
         logger.info("Cinematic startup completed in %.2fs", end_ts - start_ts)
 
-    def _start_voice_capture(self, wait_for: Optional[threading.Thread] = None) -> None:
-        if self._voice_thread and self._voice_thread.is_alive():
-            return
 
-        def _runner() -> None:
-            if wait_for:
-                wait_for.join()
-            try:
-                text = listen_for_command()
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Voice capture failed: %s", exc)
-                return
-
-            if text:
-                logger.info("Voice input received; routing command.")
-                self._events.emit("command_received", {"text": text})
-            else:
-                logger.info("No voice command captured; waiting for typed input.")
-
-        self._voice_thread = threading.Thread(target=_runner, name="voice-listener", daemon=True)
-        self._voice_thread.start()
 
     def _handle_command(self, payload: dict) -> None:
         interaction_steps = []
         final_result = None
         try:
             text = payload.get("text", "")
-            logger.info("Received command: %s", text)
+            if text:
+                text = text.lower().strip()
+                
+            if payload.get("source") == "voice":
+                logger.info("[VOICE] %s", text)
+            else:
+                logger.info("Received command: %s", text)
+                
             result = route_command(text)
-            if result.get("action") == "unknown":
+            
+            action = result.get("action", "")
+            logger.info("[ROUTER] Matched: %s", action)
+            
+            if action == "unknown":
                 history_entries = get_recent_history()
                 relevant_entries = get_relevant_context(text)
                 ai_result = interpret_command(text, history=history_entries, relevant=relevant_entries)
@@ -142,6 +134,12 @@ class JarvisApp:
                         }
                         for step, res in zip(steps, step_results)
                     ]
+                    
+                    # Speak AI response if available
+                    ai_msg = ai_result.get("message")
+                    if ai_msg:
+                        speak(ai_msg)
+                        
                     self._events.emit("command_result", final_result)
                     return
                 else:
@@ -152,7 +150,7 @@ class JarvisApp:
             extra = result.get("extra", {})
 
             if action in ACTION_REGISTRY:
-                logger.info("Executing action: %s target=%s", action, target)
+                logger.info("[EXEC] Running: %s", action)
                 exec_result = execute_action(action, target, extra)
                 result["exec_result"] = exec_result
                 result["message"] = exec_result.get("message", result.get("message", ""))
@@ -166,6 +164,12 @@ class JarvisApp:
                     }
                 ]
             self._events.emit("command_result", result)
+            
+            # Speak the result message
+            res_msg = result.get("message")
+            if res_msg:
+                speak(res_msg)
+                
             final_result = result
         except Exception as exc:  # noqa: BLE001
             final_result = {"action": "error", "message": str(exc), "type": "error"}
@@ -211,6 +215,14 @@ class JarvisApp:
     def _shutdown(self) -> None:
         try:
             self._clap_detector.stop()
-        finally:
-            if self._listener_thread and self._listener_thread.is_alive():
-                self._listener_thread.join(timeout=0.2)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Error stopping clap detector: %s", exc)
+
+        if hasattr(self, 'voice'):
+            try:
+                self.voice.stop()
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Error stopping voice listener: %s", exc)
+                
+        if self._listener_thread and self._listener_thread.is_alive():
+            self._listener_thread.join(timeout=0.2)

@@ -16,6 +16,11 @@ from executor.system_executor import (
     move_file,
     rename_file,
     search_file,
+    open_app,
+    media_control,
+    power_state,
+    capture_screen,
+    quick_search,
 )
 
 ACTION_REGISTRY = {
@@ -32,6 +37,11 @@ ACTION_REGISTRY = {
     "convert_to_mp3": convert_to_mp3,
     "convert_to_pdf": convert_to_pdf,
     "trigger_n8n": trigger_workflow,
+    "open_app": open_app,
+    "media_control": media_control,
+    "power_state": power_state,
+    "capture_screen": capture_screen,
+    "quick_search": quick_search,
 }
 
 
