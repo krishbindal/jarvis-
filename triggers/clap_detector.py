@@ -17,26 +17,45 @@ class ClapDetector:
         sample_rate: int = 44_100,
         chunk_size: int = 2_048,
         clap_threshold: float = 0.35,
-        max_gap_s: float = 0.45,
-        cooldown_s: float = 1.5,
+        min_gap_s: float = 0.5,
+        max_gap_s: float = 1.0,
+        cooldown_s: float = 2.5,
+        calibration_seconds: float = 2.0,
         device: Optional[int] = None,
     ) -> None:
         self.on_double_clap = on_double_clap
         self.sample_rate = sample_rate
         self.chunk_size = chunk_size
         self.clap_threshold = clap_threshold
+        self.min_gap_s = min_gap_s
         self.max_gap_s = max_gap_s
         self.cooldown_s = cooldown_s
+        self.calibration_seconds = calibration_seconds
         self.device = device
 
         self._running = threading.Event()
         self._stream: Optional[sd.InputStream] = None
         self._first_clap_ts: Optional[float] = None
         self._last_trigger_ts: float = 0.0
+        self._above_threshold = False
+        self._calibration_done = False
+        self._calibration_end_ts: float = 0.0
+        self._noise_samples: list[float] = []
+        self._noise_floor: float = 0.0
+        self._dynamic_threshold: float = clap_threshold
 
     def start(self) -> None:
         if self._running.is_set():
             return
+        self._calibration_done = False
+        self._calibration_end_ts = time.monotonic() + self.calibration_seconds
+        self._noise_samples = []
+        self._noise_floor = 0.0
+        self._dynamic_threshold = self.clap_threshold
+        self._first_clap_ts = None
+        self._last_trigger_ts = 0.0
+        self._above_threshold = False
+        print(f"Calibrating ambient noise for {self.calibration_seconds:.1f}s...")
         try:
             stream = sd.InputStream(
                 samplerate=self.sample_rate,
@@ -74,21 +93,56 @@ class ClapDetector:
 
         now = time.monotonic()
         peak = float(np.max(np.abs(indata)))
-        if peak < self.clap_threshold:
+
+        if not self._calibration_done:
+            rms = float(np.sqrt(np.mean(np.square(indata))))
+            self._noise_samples.append(rms)
+            if now >= self._calibration_end_ts:
+                if self._noise_samples:
+                    self._noise_floor = float(np.median(self._noise_samples))
+                self._dynamic_threshold = max(self.clap_threshold, self._noise_floor * 5.0, 0.05)
+                self._calibration_done = True
+                print(
+                    f"Calibration complete. Noise floor={self._noise_floor:.4f}, "
+                    f"threshold={self._dynamic_threshold:.4f}"
+                )
             return
 
-        if self._first_clap_ts and (now - self._first_clap_ts) <= self.max_gap_s:
-            if now - self._last_trigger_ts < self.cooldown_s:
-                return
-            self._trigger_double_clap(now)
-            self._first_clap_ts = None
+        threshold = self._dynamic_threshold
+        if peak < threshold:
+            self._above_threshold = False
             return
 
-        self._first_clap_ts = now
+        if self._above_threshold:
+            return
+        self._above_threshold = True
+        print(f"Peak detected: {peak:.3f} (threshold {threshold:.3f})")
 
-    def _trigger_double_clap(self, ts: float) -> None:
+        if now - self._last_trigger_ts < self.cooldown_s:
+            print("Ignoring peak: in cooldown window.")
+            return
+
+        if self._first_clap_ts is None:
+            self._first_clap_ts = now
+            print("First clap candidate stored.")
+            return
+
+        delta = now - self._first_clap_ts
+        if delta < self.min_gap_s:
+            print(f"Ignoring peak: too close to first ({delta:.2f}s).")
+            return
+        if delta > self.max_gap_s:
+            print(f"Resetting: peak too far from first ({delta:.2f}s).")
+            self._first_clap_ts = now
+            return
+
+        self._trigger_double_clap(now, delta)
+        self._first_clap_ts = None
+
+    def _trigger_double_clap(self, ts: float, delta: float) -> None:
         self._last_trigger_ts = ts
-        print("Double clap detected.")
+        print(f"Double clap detected (gap {delta:.2f}s).")
+        self._above_threshold = True
         if self.on_double_clap:
             try:
                 self.on_double_clap()

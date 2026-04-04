@@ -46,4 +46,5 @@ sd.play(soundfile.read("path/to/ironman_theme.wav")[0], samplerate=44100, blocki
 
 ## Notes
 - Clap detection uses an amplitude threshold; if your environment is noisy, tune `clap_threshold`, `max_gap_s`, and `cooldown_s` in `triggers/clap_detector.py`.
+- The detector now auto-calibrates ambient noise for the first two seconds, looks for two distinct peaks 0.5–1.0s apart, ignores continuous noise, and enforces a ~2.5s cooldown after a trigger.
 - Future phases will fill `brain/`, `executor/`, and `memory/` with AI, automation, and persistence modules.
