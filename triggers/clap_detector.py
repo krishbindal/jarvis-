@@ -11,6 +11,9 @@ import sounddevice as sd
 
 import config
 from utils import EventBus
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ClapDetector:
@@ -84,15 +87,16 @@ class ClapDetector:
         self._running.set()
 
     def stop(self) -> None:
-        if self._stream is None:
-            self._running.clear()
-            return
+        logger.info("Shutting down clap detector")
         self._running.clear()
-        try:
-            self._stream.stop()
-            self._stream.close()
-        finally:
-            self._stream = None
+        if self._stream:
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except Exception as e:
+                logger.error(f"Error stopping audio stream: {e}")
+            finally:
+                self._stream = None
 
     def _process_audio(self, indata: np.ndarray, frames: int, time_info, status) -> None:  # type: ignore[override]
         if status:

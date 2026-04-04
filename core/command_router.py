@@ -3,40 +3,28 @@ from __future__ import annotations
 """
 Universal Dynamic Command Router for JARVIS-X Dexter Copilot.
 
-Parses all natural language commands WITHOUT hardcoding specific sites or apps.
-Supports patterns:
-    open <target>
-    open <target> on/in <app>
-    go to <folder>
-    play/pause/mute/skip
-    lock/sleep
-    search <query>
-    hi/hello/how are you
+Architecture (Phase 14 — Clean Separation):
+    command_parser.py  → NLP normalization, multi-step split, session context
+    command_cache.py   → LRU cache for repeated commands
+    command_router.py  → Pattern matching + dynamic type detection (this file)
+    action_registry.py → Execution engine with self-healing fallback
+
+All natural language → NO hardcoded sites/apps → dynamic type detection.
 """
 
 import re
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from core.command_spec import COMMAND_SPEC
 from core.network_spec import NETWORK_SPEC
+from core.command_parser import normalize, split_multi_step, session
+from core.command_cache import route_cache
 
 # ─────────────────────────────────────────────────
-# NLP Pre-Processing
+# Extensible Lookup Tables (not hardcoded logic)
 # ─────────────────────────────────────────────────
 
-_STOP_WORDS = ("please", "jarvis", "hey jarvis", "okay jarvis", "ok jarvis")
-
-_FILLER_PHRASES = (
-    "can you ", "could you ", "would you ", "will you ",
-    "i want you to ", "i need you to ", "i'd like you to ",
-    "please ", "now ", "just ", "go ahead and ",
-    "for me ", "kindly ", "try to ",
-)
-
-_PLACEHOLDER_FIELDS = ("path", "name", "src", "dest", "new_name", "root_path")
-
-# Well-known site shortcuts → full URLs (extensible, not hardcoded logic)
 _SITE_SHORTCUTS = {
     "youtube":   "https://www.youtube.com",
     "google":    "https://www.google.com",
@@ -54,9 +42,10 @@ _SITE_SHORTCUTS = {
     "amazon":    "https://www.amazon.com",
     "chatgpt":   "https://chat.openai.com",
     "stackoverflow": "https://stackoverflow.com",
+    "wikipedia": "https://www.wikipedia.org",
+    "twitch":    "https://www.twitch.tv",
 }
 
-# User-folder spoken shortcuts
 _FOLDER_MAP = {
     "downloads": str(Path("~").expanduser() / "Downloads"),
     "desktop":   str(Path("~").expanduser() / "Desktop"),
@@ -67,49 +56,52 @@ _FOLDER_MAP = {
     "home":      str(Path("~").expanduser()),
 }
 
-# File extensions for target-type detection
 _FILE_EXTS = (
     ".pdf", ".txt", ".docx", ".xlsx", ".pptx", ".csv",
-    ".py", ".js", ".html", ".css", ".json", ".md",
-    ".jpg", ".png", ".gif", ".mp4", ".mp3",
-    ".zip", ".rar", ".exe", ".bat",
+    ".py", ".js", ".ts", ".html", ".css", ".json", ".md", ".xml", ".yaml", ".yml",
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg",
+    ".mp4", ".mp3", ".wav", ".avi", ".mkv", ".mov",
+    ".zip", ".rar", ".7z", ".tar", ".gz",
+    ".exe", ".bat", ".msi", ".sh",
+    ".log", ".ini", ".cfg", ".conf", ".env",
 )
 
-_FOLDER_KEYWORDS = (
-    "folder", "directory", "dir",
-)
-
-# App launch identity map — spoken name → executable
 _APP_MAP = {
     "chrome":   "chrome",
     "edge":     "msedge",
     "firefox":  "firefox",
     "brave":    "brave",
+    "opera":    "opera",
     "vscode":   "code",
     "vs code":  "code",
     "visual studio code": "code",
     "notepad":  "notepad",
+    "notepad++": "notepad++",
     "explorer": "explorer",
+    "file explorer": "explorer",
     "cmd":      "cmd",
     "terminal": "wt",
     "powershell": "powershell",
     "word":     "winword",
     "excel":    "excel",
+    "powerpoint": "powerpnt",
     "discord":  "discord",
     "spotify":  "spotify",
     "steam":    "steam",
     "vlc":      "vlc",
     "obs":      "obs64",
+    "task manager": "taskmgr",
+    "calculator": "calc",
+    "settings": "ms-settings:",
+    "paint":    "mspaint",
 }
 
-# Media + Power + Vision + Greeting keywords
 _MEDIA_KEYWORDS = {
     "play": "play", "pause": "pause", "stop": "stop",
     "next": "next", "previous": "previous", "skip": "next",
     "volume up": "volume_up", "turn up": "volume_up", "louder": "volume_up",
     "volume down": "volume_down", "turn down": "volume_down", "quieter": "volume_down",
-    "mute": "mute", "unmute": "mute",
-    "resume": "play",
+    "mute": "mute", "unmute": "mute", "resume": "play",
 }
 
 _GREETINGS = (
@@ -118,29 +110,55 @@ _GREETINGS = (
     "how are you", "how r u", "how are u", "you there",
     "are you there", "wake up", "thanks", "thank you",
     "bye", "goodbye", "see you", "good night",
+    "yo", "hola",
 )
 
+_PLACEHOLDER_FIELDS = ("path", "name", "src", "dest", "new_name", "root_path")
+
 
 # ─────────────────────────────────────────────────
-# Helper functions
+# Target Intelligence (Phase 2)
 # ─────────────────────────────────────────────────
 
-def _normalize(text: str) -> str:
-    cleaned = text.strip().lower()
-    for word in _STOP_WORDS:
-        cleaned = cleaned.replace(word, "")
-    # Strip filler phrases from start
-    changed = True
-    while changed:
-        changed = False
-        for filler in _FILLER_PHRASES:
-            if cleaned.startswith(filler):
-                cleaned = cleaned[len(filler):]
-                changed = True
-                break
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    return cleaned
+def _classify_target(target: str) -> str:
+    t = target.lower().strip()
+    if t.startswith("http://") or t.startswith("https://"):
+        return "url"
+    if any(ext in t for ext in (".com", ".org", ".net", ".io", ".dev", ".co", ".tv", ".me")):
+        return "url"
+    if t in _SITE_SHORTCUTS:
+        return "url"
+    if any(t.endswith(ext) for ext in _FILE_EXTS):
+        return "file"
+    if t in _FOLDER_MAP or any(kw in t for kw in ("folder", "directory", "dir")):
+        return "folder"
+    return "unknown"
 
+
+def _resolve_url(target: str) -> str:
+    t = target.lower().strip()
+    if t.startswith("http://") or t.startswith("https://"):
+        return t
+    if t in _SITE_SHORTCUTS:
+        return _SITE_SHORTCUTS[t]
+    if any(ext in t for ext in (".com", ".org", ".net", ".io", ".dev", ".co", ".tv", ".me")):
+        return f"https://{t}" if not t.startswith("www.") else f"https://{t}"
+    return f"https://www.google.com/search?q={target.replace(' ', '+')}"
+
+
+def _resolve_folder(target: str) -> str:
+    t = target.lower().strip()
+    t = re.sub(r"\s*(folder|directory|dir)$", "", t).strip()
+    return _FOLDER_MAP.get(t, target)
+
+
+def _resolve_app(app_name: str) -> str:
+    return _APP_MAP.get(app_name.lower().strip(), app_name.lower().strip())
+
+
+# ─────────────────────────────────────────────────
+# Build helpers
+# ─────────────────────────────────────────────────
 
 def _build(action: str, target: str, message: str, extra: Optional[dict] = None) -> Dict:
     result = {"action": action, "target": target, "message": message, "type": "system"}
@@ -153,56 +171,12 @@ def _clean(val: str) -> str:
     return val.strip().strip('"').strip("'")
 
 
-def _classify_target(target: str) -> str:
-    """Dynamically detect what kind of target this is: url, file, folder, app, or query."""
-    t = target.lower().strip()
-    if t.startswith("http://") or t.startswith("https://"):
-        return "url"
-    if ".com" in t or ".org" in t or ".net" in t or ".io" in t or ".dev" in t or ".co" in t:
-        return "url"
-    if t in _SITE_SHORTCUTS:
-        return "url"
-    if any(t.endswith(ext) for ext in _FILE_EXTS):
-        return "file"
-    if t in _FOLDER_MAP or any(kw in t for kw in _FOLDER_KEYWORDS):
-        return "folder"
-    return "unknown"
-
-
-def _resolve_url(target: str) -> str:
-    """Convert a spoken target to a valid URL."""
-    t = target.lower().strip()
-    if t.startswith("http://") or t.startswith("https://"):
-        return t
-    if t in _SITE_SHORTCUTS:
-        return _SITE_SHORTCUTS[t]
-    if ".com" in t or ".org" in t or ".net" in t or ".io" in t or ".dev" in t or ".co" in t:
-        return f"https://{t}" if not t.startswith("www.") else f"https://{t}"
-    # Fallback: treat as Google search
-    return f"https://www.google.com/search?q={target.replace(' ', '+')}"
-
-
-def _resolve_folder(target: str) -> str:
-    """Convert a spoken folder name to a real path."""
-    t = target.lower().strip()
-    # Strip trailing "folder"
-    t = re.sub(r"\s*(folder|directory|dir)$", "", t).strip()
-    return _FOLDER_MAP.get(t, target)
-
-
-def _resolve_app(app_name: str) -> str:
-    """Convert a spoken app name to an executable."""
-    a = app_name.lower().strip()
-    return _APP_MAP.get(a, a)
-
-
 # ─────────────────────────────────────────────────
 # Spec matchers (file/network commands from JSON)
 # ─────────────────────────────────────────────────
 
 def _phrase_to_regex(phrase: str) -> re.Pattern[str]:
-    pattern = phrase.lower()
-    pattern = re.escape(pattern)
+    pattern = re.escape(phrase.lower())
     for field in _PLACEHOLDER_FIELDS:
         pattern = pattern.replace(r"\{" + field + r"\}", rf"(?P<{field}>.+)")
     pattern = pattern.replace(r"\ ", r"\s+")
@@ -211,170 +185,210 @@ def _phrase_to_regex(phrase: str) -> re.Pattern[str]:
 
 def _build_file_command(action: str, groups: Dict[str, str]) -> Dict[str, str]:
     cleaned = {k: _clean(v) for k, v in groups.items()}
-    if action == "list_files":
-        path = cleaned.get("path", "")
-        return {"action": action, "target": path, "extra": {}, "type": "file", "message": f"Listing files in {path}"}
-    if action == "create_folder":
-        return {"action": action, "target": cleaned.get("name", ""), "extra": {"path": cleaned.get("path", "")}, "type": "file", "message": "Creating folder"}
-    if action == "delete_file":
-        return {"action": action, "target": cleaned.get("path", ""), "extra": {}, "type": "file", "message": "Deleting file"}
-    if action == "move_file":
-        return {"action": action, "target": cleaned.get("dest", ""), "extra": {"source": cleaned.get("src", "")}, "type": "file", "message": "Moving file"}
-    if action == "copy_file":
-        return {"action": action, "target": cleaned.get("dest", ""), "extra": {"source": cleaned.get("src", "")}, "type": "file", "message": "Copying file"}
-    if action == "rename_file":
-        return {"action": action, "target": cleaned.get("path", ""), "extra": {"new_name": cleaned.get("new_name", "")}, "type": "file", "message": "Renaming file"}
-    if action == "search_file":
-        return {"action": action, "target": cleaned.get("name", ""), "extra": {"root_path": cleaned.get("root_path", "")}, "type": "file", "message": "Searching file"}
-    if action == "file_info":
-        return {"action": action, "target": cleaned.get("path", ""), "extra": {}, "type": "file", "message": "File info"}
+    extra_map = {
+        "list_files":    lambda c: {"target": c.get("path", ""), "extra": {}},
+        "create_folder": lambda c: {"target": c.get("name", ""), "extra": {"path": c.get("path", "")}},
+        "delete_file":   lambda c: {"target": c.get("path", ""), "extra": {}},
+        "move_file":     lambda c: {"target": c.get("dest", ""), "extra": {"source": c.get("src", "")}},
+        "copy_file":     lambda c: {"target": c.get("dest", ""), "extra": {"source": c.get("src", "")}},
+        "rename_file":   lambda c: {"target": c.get("path", ""), "extra": {"new_name": c.get("new_name", "")}},
+        "search_file":   lambda c: {"target": c.get("name", ""), "extra": {"root_path": c.get("root_path", "")}},
+        "file_info":     lambda c: {"target": c.get("path", ""), "extra": {}},
+    }
+    mapper = extra_map.get(action)
+    if mapper:
+        result = mapper(cleaned)
+        return {"action": action, "target": result["target"], "extra": result["extra"],
+                "type": "file", "message": action.replace("_", " ").title()}
     return {"action": "unknown", "target": "", "extra": {}, "type": "file", "message": "Unknown file command"}
 
 
-def _match_file_command(normalized: str) -> Dict[str, str] | None:
+def _match_file_command(normalized: str) -> Dict | None:
     for spec in COMMAND_SPEC:
         action = spec.get("action", "")
         for phrase in spec.get("phrases", []):
-            regex = _phrase_to_regex(phrase)
-            m = regex.match(normalized)
+            m = _phrase_to_regex(phrase).match(normalized)
             if m:
                 return _build_file_command(action, m.groupdict())
     return None
 
 
-def _match_network_command(normalized: str) -> Dict[str, str] | None:
+def _match_network_command(normalized: str) -> Dict | None:
     for spec in NETWORK_SPEC:
         action = spec.get("action", "")
         cmd_type = spec.get("type", "network")
         for phrase in spec.get("phrases", []):
-            regex = _phrase_to_regex(phrase)
-            m = regex.match(normalized)
+            m = _phrase_to_regex(phrase).match(normalized)
             if m:
                 cleaned = {k: _clean(v) for k, v in m.groupdict().items()}
                 target = cleaned.get("url") or cleaned.get("path") or ""
-                return {"action": action, "target": target, "extra": cleaned, "type": cmd_type, "message": "Processing network request"}
+                return {"action": action, "target": target, "extra": cleaned,
+                        "type": cmd_type, "message": "Processing network request"}
     return None
 
 
 # ─────────────────────────────────────────────────
-# MAIN ROUTER
+# SINGLE-STEP ROUTER (internal)
 # ─────────────────────────────────────────────────
 
-def route_command(text: str) -> Dict[str, str]:
-    """Universal dynamic command router — NO hardcoded sites or apps."""
-    normalized = _normalize(text)
+def _route_single(normalized: str) -> Dict:
+    """Route a single normalized command string. Used internally by route_command."""
 
     if not normalized:
         return _build("noop", "", "Empty command.")
 
-    # ── 1. Greetings / Conversational ─────────────────────────────
+    # ── 1. Greetings ──────────────────────────────────────────
     if normalized in _GREETINGS or any(normalized.startswith(g) for g in _GREETINGS):
-        return _build("chat", normalized, "Hi! I'm Jarvis, your Dexter Copilot. How can I help you?")
+        return _build("chat", normalized, "Greeting")
 
-    # ── 2. File-spec commands (COMMAND_SPEC patterns) ─────────────
+    # ── 2. File-spec (JSON patterns) ──────────────────────────
     file_cmd = _match_file_command(normalized)
     if file_cmd:
         return file_cmd
 
-    # ── 3. Network-spec commands (NETWORK_SPEC patterns) ──────────
+    # ── 3. Network-spec (JSON patterns) ───────────────────────
     net_cmd = _match_network_command(normalized)
     if net_cmd:
         return net_cmd
 
-    # ── 4. n8n workflow triggers ──────────────────────────────────
+    # ── 4. n8n workflows ──────────────────────────────────────
     if normalized.startswith("send to telegram"):
         return _build("trigger_n8n", "send_to_telegram", "Running workflow")
     if normalized.startswith("backup file"):
         return _build("trigger_n8n", "backup_files", "Running workflow")
     wf = re.match(r"^run workflow\s+(.+)$", normalized)
     if wf:
-        return _build("trigger_n8n", wf.group(1).strip(), f"Running workflow {wf.group(1)}")
+        return _build("trigger_n8n", wf.group(1).strip(), "Running workflow")
 
-    # ── 5. Navigation: "go to downloads", "take me to desktop" ───
+    # ── 5. Navigation ─────────────────────────────────────────
     nav = re.match(r"^(?:go to|take me to|navigate to|open my)\s+(.+)$", normalized)
     if nav:
         target = nav.group(1).strip()
-        target_type = _classify_target(target)
-        if target_type == "url":
+        ttype = _classify_target(target)
+        if ttype == "url":
             return _build("open_dynamic", _resolve_url(target), f"Opening {target}",
                           extra={"resolved_type": "url"})
-        real_path = _resolve_folder(target)
-        return _build("open_folder", real_path, f"Opening {target}")
+        return _build("open_folder", _resolve_folder(target), f"Opening {target}")
 
-    # ── 6. DYNAMIC OPEN PARSER ────────────────────────────────────
-    # Pattern: open <target> on/in/with <app>
+    # ── 6. Dynamic Open: open <target> on/in <app> ────────────
     open_with = re.match(
-        r"^(?:open|launch|start)\s+(.+?)\s+(?:on|in|with|using)\s+(.+)$",
-        normalized
+        r"^(?:open|launch|start)\s+(.+?)\s+(?:on|in|with|using)\s+(.+)$", normalized
     )
     if open_with:
         target = open_with.group(1).strip()
-        app    = open_with.group(2).strip()
-        target_type = _classify_target(target)
+        app = open_with.group(2).strip()
+        ttype = _classify_target(target)
+        exe = _resolve_app(app)
 
-        if target_type == "url":
+        # Record app for context awareness
+        session.record("open_dynamic", target, app=exe)
+
+        if ttype in ("url", "unknown"):
             url = _resolve_url(target)
-            exe = _resolve_app(app)
             return _build("open_dynamic", url, f"Opening {target} in {app}",
                           extra={"app": exe, "resolved_type": "url"})
-        elif target_type == "file":
-            exe = _resolve_app(app)
+        elif ttype == "file":
             return _build("open_dynamic", target, f"Opening {target} in {app}",
                           extra={"app": exe, "resolved_type": "file"})
-        elif target_type == "folder":
-            return _build("open_folder", _resolve_folder(target), f"Opening folder {target}")
         else:
-            # Could be an app or unknown. Try URL first, then app
-            url = _resolve_url(target)
-            exe = _resolve_app(app)
-            return _build("open_dynamic", url, f"Opening {target} in {app}",
-                          extra={"app": exe, "resolved_type": "url"})
+            return _build("open_folder", _resolve_folder(target), f"Opening folder {target}")
 
-    # Pattern: open folder <name>
+    # ── 7. Open folder <name> ─────────────────────────────────
     folder_match = re.match(r"^(?:open|launch|start)\s+folder\s+(.+)$", normalized)
     if folder_match:
         target = folder_match.group(1).strip().strip("'\"")
         return _build("open_folder", _resolve_folder(target), f"Opening folder {target}")
 
-    # Pattern: open <target>  (generic — dynamic type detection)
+    # ── 8. Open <target> (generic — dynamic type detection) ───
     open_generic = re.match(r"^(?:open|launch|start)\s+(.+)$", normalized)
     if open_generic:
         target = open_generic.group(1).strip()
-        target_type = _classify_target(target)
+        ttype = _classify_target(target)
 
-        if target_type == "url":
-            return _build("open_dynamic", _resolve_url(target), f"Opening {target}",
-                          extra={"resolved_type": "url"})
-        elif target_type == "file":
-            return _build("open_dynamic", target, f"Opening file {target}",
-                          extra={"resolved_type": "file"})
-        elif target_type == "folder":
+        # Context awareness: if last command was a browser, reuse it
+        ctx_app = session.get_context_app()
+
+        if ttype == "url":
+            url = _resolve_url(target)
+            extra = {"resolved_type": "url"}
+            if ctx_app and ctx_app in ("chrome", "msedge", "firefox", "brave"):
+                extra["app"] = ctx_app
+            session.record("open_dynamic", target)
+            return _build("open_dynamic", url, f"Opening {target}", extra=extra)
+        elif ttype == "file":
+            extra = {"resolved_type": "file"}
+            if ctx_app:
+                extra["app"] = ctx_app
+            return _build("open_dynamic", target, f"Opening file {target}", extra=extra)
+        elif ttype == "folder":
             return _build("open_folder", _resolve_folder(target), f"Opening {target}")
         else:
-            # Unknown type → treat as an app
+            # Unknown: treat as app launch
+            session.record("open_app", target, app=_resolve_app(target))
             return _build("open_app", target, f"Opening {target}")
 
-    # ── 7. Media Controls ─────────────────────────────────────────
+    # ── 9. Media Controls ─────────────────────────────────────
     for phrase, action_key in _MEDIA_KEYWORDS.items():
         if re.search(rf"\b{re.escape(phrase)}\b", normalized):
             return _build("media_control", action_key, f"Executing: {action_key}")
 
-    # ── 8. Power Controls ─────────────────────────────────────────
+    # ── 10. Power Controls ────────────────────────────────────
     if re.search(r"\b(lock|lock\s+(pc|computer|screen|workstation))\b", normalized):
         return _build("power_state", "lock", "Locking workstation")
     if re.search(r"\b(sleep|suspend|hibernate)\s*(pc|computer|laptop)?\b", normalized):
         return _build("power_state", "sleep", "Putting system to sleep")
+    if re.search(r"\b(shutdown|shut down|power off|turn off)\s*(pc|computer|laptop)?\b", normalized):
+        return _build("power_state", "shutdown", "Shutting down")
+    if re.search(r"\b(restart|reboot)\s*(pc|computer|laptop)?\b", normalized):
+        return _build("power_state", "restart", "Restarting")
 
-    # ── 9. Vision / Screen ────────────────────────────────────────
+    # ── 11. Vision / Screen ───────────────────────────────────
     if re.search(r"\b(capture screen|take screenshot|screenshot|what is on my screen|see my screen|what do you see)\b", normalized):
         return _build("capture_screen", "", "Capturing screen context")
 
-    # ── 10. Web Search ────────────────────────────────────────────
-    search_match = re.match(r"^(?:search for|search the web for|search|what is|who is|look up|google|search google)\s+(.+)$", normalized)
+    # ── 12. Web Search ────────────────────────────────────────
+    search_match = re.match(
+        r"^(?:search for|search the web for|search|what is|who is|look up|google|search google)\s+(.+)$",
+        normalized
+    )
     if search_match:
         q = search_match.group(1).strip()
         if q:
             return _build("quick_search", q, f"Searching web for: {q}")
 
-    # ── 11. Fallback → AI ────────────────────────────────────────
+    # ── 13. Fallback → unknown (will be sent to AI) ──────────
     return _build("unknown", "", "Command not recognized.")
+
+
+# ─────────────────────────────────────────────────
+# PUBLIC API
+# ─────────────────────────────────────────────────
+
+def route_command(text: str) -> Dict | List[Dict]:
+    """
+    Route a natural language command to structured action(s).
+
+    Returns a single dict for simple commands, or a list of dicts
+    for multi-step commands ("open chrome and search youtube").
+
+    Includes LRU cache (Phase 11) and multi-step splitting (Phase 5).
+    """
+    # Phase 11: Check cache first
+    cached = route_cache.get(text)
+    if cached is not None:
+        return cached
+
+    # Phase 5: Multi-step splitting
+    steps = split_multi_step(text)
+
+    if len(steps) <= 1:
+        # Single command
+        normalized = steps[0] if steps else ""
+        result = _route_single(normalized)
+        route_cache.put(text, result)
+        return result
+    else:
+        # Multi-step: route each independently
+        results = [_route_single(step) for step in steps]
+        route_cache.put(text, results)
+        return results

@@ -3,8 +3,7 @@ from __future__ import annotations
 """Offline voice input using Vosk and sounddevice."""
 
 import json
-import queue
-import time
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -22,94 +21,92 @@ except Exception as exc:  # noqa: BLE001
     Model = None
     logger.error("Vosk is not available: %s", exc)
 
-_MODEL: Optional[Model] = None
+# COMMAND_GRAMMAR is no longer used, Vosk will use its full vocabulary 
+# to support opening any app.
 
+COMMAND_KEYWORDS = [
+    "open", "close", "download", "search",
+    "play", "stop", "list", "create", "delete"
+]
 
-def _load_model(path: str | Path) -> Optional[Model]:
-    """Load and cache the Vosk model."""
-    global _MODEL
-    if _MODEL is not None:
-        return _MODEL
-    if Model is None:
-        logger.error("Vosk dependency missing; install the 'vosk' package.")
-        return None
+def clean_text(text: str) -> str:
+    words = text.split()
+    if len(words) > 3 and all(len(w) == 1 for w in words):
+        return "".join(words)
+    return text
 
-    model_path = Path(path)
-    if not model_path.exists():
-        logger.error("Voice model not found at %s", model_path)
-        return None
+class VoiceListener:
+    def __init__(self, event_bus):
+        self._event_bus = event_bus
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
+        
+        # Load Vosk Model once
+        self.model = None
+        self.rec = None
+        
+        if Model is None:
+            logger.error("Vosk dependency missing; cannot initialize VoiceListener.")
+            return
+            
+        model_path = Path(config.VOICE_MODEL_PATH)
+        if not model_path.exists():
+            logger.error("Voice model not found at %s", model_path)
+            return
+            
+        try:
+            self.model = Model(str(model_path))
+            # Initializing recognizer without strict grammar limits to allow identifying any installed app
+            self.rec = KaldiRecognizer(self.model, 16000)
+            logger.info("Vosk VoiceListener initialized successfully.")
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to load Vosk model: %s", exc)
 
-    try:
-        _MODEL = Model(str(model_path))
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to load Vosk model: %s", exc)
-        return None
-    return _MODEL
-
-
-def listen_for_command(
-    timeout: float = 6.0,
-    phrase_time_limit: float = 10.0,
-    sample_rate: int = 16_000,
-) -> Optional[str]:
-    """
-    Capture microphone input and convert speech to text using Vosk.
-
-    Returns None when no valid speech is detected or recognition fails.
-    """
-
-    model = _load_model(config.VOICE_MODEL_PATH)
-    if model is None or KaldiRecognizer is None:
-        return None
-
-    audio_queue: "queue.Queue[bytes]" = queue.Queue()
-
-    def _callback(indata, frames, time_info, status) -> None:  # type: ignore[override]
+    def _callback(self, indata, frames, time_info, status):
         if status:
             logger.debug("Audio status: %s", status)
-        audio_queue.put(bytes(indata))
 
-    recognizer = KaldiRecognizer(model, sample_rate)
-    recognizer.SetWords(True)
+        if self.rec and self.rec.AcceptWaveform(bytes(indata)):
+            result = json.loads(self.rec.Result())
+            text = result.get("text", "").strip()
 
-    speech_started_at: Optional[float] = None
-    listen_started_at = time.monotonic()
-
-    try:
-        with sd.RawInputStream(
-            samplerate=sample_rate,
-            blocksize=8000,
-            dtype="int16",
-            channels=1,
-            callback=_callback,
-        ):
-            while True:
-                wait_timeout = timeout if speech_started_at is None else 1.0
-                try:
-                    data = audio_queue.get(timeout=wait_timeout)
-                except queue.Empty:
-                    logger.info("No speech detected within timeout window.")
-                    return None
-
-                if recognizer.AcceptWaveform(data):
-                    result = json.loads(recognizer.Result() or "{}")
-                    text = (result.get("text") or "").strip()
-                    if text:
-                        logger.info("Captured voice command: %s", text)
-                        return text
+            if text:
+                text = clean_text(text)
+                
+                # Filter against our generic expected commands
+                if any(word in text for word in COMMAND_KEYWORDS):
+                    logger.info("✅ Voice Command: %s", text)
+                    self._event_bus.emit(
+                        "command_received",
+                        {"text": text, "source": "voice"}
+                    )
                 else:
-                    partial = json.loads(recognizer.PartialResult() or "{}")
-                    partial_text = (partial.get("partial") or "").strip()
-                    if partial_text and speech_started_at is None:
-                        speech_started_at = time.monotonic()
+                    logger.debug("❌ Ignored partial/unrelated speech: %s", text)
 
-                now = time.monotonic()
-                if speech_started_at and (now - speech_started_at) > phrase_time_limit:
-                    final = json.loads(recognizer.FinalResult() or "{}")
-                    text = (final.get("text") or "").strip()
-                    return text or None
-                if speech_started_at is None and (now - listen_started_at) > timeout:
-                    return None
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Voice capture failed: %s", exc)
-        return None
+    def _run(self):
+        logger.info("Starting background voice listener.")
+        try:
+            with sd.RawInputStream(
+                samplerate=16000,
+                blocksize=8000,
+                dtype='int16',
+                channels=1,
+                callback=self._callback
+            ):
+                while self._running:
+                    # Keep thread alive to process audio stream callbacks
+                    sd.sleep(100)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Voice listener crashed: %s", exc)
+
+    def start(self):
+        if self._running or self.model is None or self.rec is None:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._run, name="voice-listener-thread", daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._running = False
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=1.0)
