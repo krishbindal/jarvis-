@@ -11,6 +11,7 @@ from core.startup import start_startup_sequence
 from executor.download_executor import download_file, download_video
 from executor.conversion_executor import execute_conversion
 from executor.system_executor import execute_file_command
+from memory.memory_store import get_recent_history, save_interaction
 from triggers.clap_detector import ClapDetector
 from ui.application import launch_ui
 from utils import EventBus
@@ -76,11 +77,14 @@ class JarvisApp:
         print(f"Cinematic startup completed in {end_ts - start_ts:.2f}s")
 
     def _handle_command(self, payload: dict) -> None:
+        interaction_steps = []
+        final_result = None
         try:
             text = payload.get("text", "")
             result = route_command(text)
             if result.get("action") == "unknown":
-                ai_result = interpret_command(text)
+                history_entries = get_recent_history()
+                ai_result = interpret_command(text, history=history_entries)
                 steps = ai_result.get("steps") or []
                 if steps:
                     step_results = []
@@ -91,7 +95,18 @@ class JarvisApp:
                         if not exec_res.get("success", True) and self.stop_on_error:
                             break
                         previous = exec_res
-                    self._events.emit("command_result", {"steps": step_results, "type": "ai"})
+                    final_result = {"steps": step_results, "type": "ai"}
+                    interaction_steps = [
+                        {
+                            "action": step.get("action", ""),
+                            "target": step.get("target", ""),
+                            "status": res.get("status"),
+                            "output": res.get("output"),
+                            "message": res.get("message"),
+                        }
+                        for step, res in zip(steps, step_results)
+                    ]
+                    self._events.emit("command_result", final_result)
                     return
                 else:
                     result = {"action": "unknown", "target": "", "message": ai_result.get("message", "No AI result"), "type": "ai"}
@@ -100,6 +115,15 @@ class JarvisApp:
                 exec_result = execute_file_command(result.get("action", ""), result.get("target", ""), result.get("extra", {}))
                 result["exec_result"] = exec_result
                 result["message"] = exec_result.get("message", result.get("message", ""))
+                interaction_steps = [
+                    {
+                        "action": result.get("action", ""),
+                        "target": result.get("target", ""),
+                        "status": exec_result.get("status"),
+                        "output": exec_result.get("output"),
+                        "message": exec_result.get("message"),
+                    }
+                ]
             elif result.get("type") == "network":
                 action = result.get("action", "")
                 if action == "download_video":
@@ -108,13 +132,38 @@ class JarvisApp:
                     exec_result = download_file(result.get("target", ""))
                 result["exec_result"] = exec_result
                 result["message"] = exec_result.get("message", result.get("message", ""))
+                interaction_steps = [
+                    {
+                        "action": result.get("action", ""),
+                        "target": result.get("target", ""),
+                        "status": exec_result.get("status"),
+                        "output": exec_result.get("output"),
+                        "message": exec_result.get("message"),
+                    }
+                ]
             elif result.get("type") == "conversion":
                 exec_result = execute_conversion(result.get("action", ""), result.get("target", ""))
                 result["exec_result"] = exec_result
                 result["message"] = exec_result.get("message", result.get("message", ""))
+                interaction_steps = [
+                    {
+                        "action": result.get("action", ""),
+                        "target": result.get("target", ""),
+                        "status": exec_result.get("status"),
+                        "output": exec_result.get("output"),
+                        "message": exec_result.get("message"),
+                    }
+                ]
             self._events.emit("command_result", result)
+            final_result = result
         except Exception as exc:  # noqa: BLE001
+            final_result = {"action": "error", "message": str(exc), "type": "error"}
             print(f"Command handling failed: {exc}")
+        finally:
+            try:
+                save_interaction(payload.get("text", ""), interaction_steps, final_result or {})
+            except Exception as exc:  # noqa: BLE001
+                print(f"Memory persistence failed: {exc}")
 
     def _execute_step(self, step: dict, previous_result: Optional[dict] = None) -> dict:
         action = step.get("action", "")

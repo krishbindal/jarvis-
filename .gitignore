@@ -1,0 +1,11 @@
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Local environment
+.venv/
+venv/
+
+# Runtime memory
+memory/memory.json
