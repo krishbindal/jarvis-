@@ -14,6 +14,7 @@ from executor.system_executor import execute_file_command
 from triggers.clap_detector import ClapDetector
 from ui.application import launch_ui
 from utils import EventBus
+from brain.ai_engine import interpret_command
 
 
 class JarvisApp:
@@ -77,6 +78,10 @@ class JarvisApp:
         try:
             text = payload.get("text", "")
             result = route_command(text)
+            if result.get("action") == "unknown":
+                ai_result = interpret_command(text)
+                if ai_result.get("action") and ai_result.get("action") != "unknown":
+                    result = ai_result
             if result.get("type") == "file":
                 exec_result = execute_file_command(result.get("action", ""), result.get("target", ""), result.get("extra", {}))
                 result["exec_result"] = exec_result
