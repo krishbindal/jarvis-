@@ -33,6 +33,7 @@ python main.py
 
 - Wait for a **double clap** to trigger startup.
 - The startup MP3 (`assets/sounds/startup.mp3`) plays with pygame, then the PySide6 HUD opens. If the file is missing, the app will continue without audio.
+- The UI now uses a dark Jarvis HUD with neon accents, a circular animation, command log panel, and status banner.
 
 If you want to bypass clap activation (e.g., during development), instantiate `JarvisApp(auto_start=True)` in `main.py`.
 
