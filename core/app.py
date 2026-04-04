@@ -11,7 +11,7 @@ from core.startup import start_startup_sequence
 from executor.download_executor import download_file, download_video
 from executor.conversion_executor import execute_conversion
 from executor.system_executor import execute_file_command
-from memory.memory_store import get_recent_history, save_interaction
+from memory.memory_store import get_recent_history, get_relevant_context, save_interaction
 from triggers.clap_detector import ClapDetector
 from ui.application import launch_ui
 from utils import EventBus
@@ -84,7 +84,8 @@ class JarvisApp:
             result = route_command(text)
             if result.get("action") == "unknown":
                 history_entries = get_recent_history()
-                ai_result = interpret_command(text, history=history_entries)
+                relevant_entries = get_relevant_context(text)
+                ai_result = interpret_command(text, history=history_entries, relevant=relevant_entries)
                 steps = ai_result.get("steps") or []
                 if steps:
                     step_results = []
