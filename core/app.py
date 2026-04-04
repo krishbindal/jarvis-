@@ -149,7 +149,19 @@ class JarvisApp:
             target = result.get("target", "")
             extra = result.get("extra", {})
 
-            if action in ACTION_REGISTRY:
+            # 'chat' is a greeting — speak and return immediately
+            if action == "chat":
+                logger.info("[EXEC] Greeting: %s", target)
+                exec_result = execute_action(action, target, extra)
+                result["exec_result"] = exec_result
+                result["message"] = exec_result.get("message", result.get("message", ""))
+                self._events.emit("command_result", result)
+                speak(exec_result.get("message", ""))
+                final_result = result
+                return
+
+            # Execute known actions (including open_dynamic)
+            if action not in ("unknown", "noop"):
                 logger.info("[EXEC] Running: %s", action)
                 exec_result = execute_action(action, target, extra)
                 result["exec_result"] = exec_result
