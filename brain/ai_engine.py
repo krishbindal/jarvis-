@@ -12,7 +12,7 @@ MODEL = "llama3"
 
 SYSTEM_PROMPT = """
 You are Jarvis AI.
-Convert user input into a JSON list of steps.
+Convert user input into a JSON list of steps. You may refer to previous outputs in next steps.
 
 Available actions:
 * open_app

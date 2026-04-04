@@ -28,6 +28,7 @@ class JarvisApp:
         self._events.subscribe("command_received", self._handle_command)
         self._clap_detector = ClapDetector(event_bus=self._events)
         self._listener_thread: Optional[threading.Thread] = None
+        self.stop_on_error: bool = True
 
     def _handle_activation(self) -> None:
         if self._activation_event.is_set():
@@ -83,11 +84,13 @@ class JarvisApp:
                 steps = ai_result.get("steps") or []
                 if steps:
                     step_results = []
+                    previous = None
                     for step in steps:
-                        exec_res = self._execute_step(step)
+                        exec_res = self._execute_step(step, previous_result=previous)
                         step_results.append(exec_res)
                         if not exec_res.get("success", True) and self.stop_on_error:
                             break
+                        previous = exec_res
                     self._events.emit("command_result", {"steps": step_results, "type": "ai"})
                     return
                 else:
@@ -113,12 +116,12 @@ class JarvisApp:
         except Exception as exc:  # noqa: BLE001
             print(f"Command handling failed: {exc}")
 
-    def _execute_step(self, step: dict) -> dict:
+    def _execute_step(self, step: dict, previous_result: Optional[dict] = None) -> dict:
         action = step.get("action", "")
-        target = step.get("target", "")
+        target = step.get("target", "") or (previous_result or {}).get("output", "")
         extra = step.get("extra", {})
         if not action:
-            return {"success": False, "message": "Missing action"}
+            return {"success": False, "status": "error", "message": "Missing action"}
         if action in ("download_file",):
             return download_file(target)
         if action in ("download_video",):
