@@ -13,6 +13,7 @@ from core.startup import start_startup_sequence
 from memory.memory_store import get_recent_history, get_relevant_context, save_interaction
 from triggers.clap_detector import ClapDetector
 from ui.application import launch_ui
+from voice.voice_input import listen_for_command
 from utils.logger import get_logger
 from utils import EventBus
 from brain.ai_engine import interpret_command
@@ -31,6 +32,7 @@ class JarvisApp:
         self._events.subscribe("command_received", self._handle_command)
         self._clap_detector = ClapDetector(event_bus=self._events)
         self._listener_thread: Optional[threading.Thread] = None
+        self._voice_thread: Optional[threading.Thread] = None
         self.stop_on_error: bool = True
 
     def _handle_activation(self) -> None:
@@ -69,6 +71,7 @@ class JarvisApp:
     def _start_cinematic_sequence(self) -> None:
         start_ts = time.monotonic()
         audio_thread = start_startup_sequence()
+        self._start_voice_capture(wait_for=audio_thread)
         try:
             launch_ui(self._events)
         except Exception as exc:  # noqa: BLE001
@@ -77,6 +80,28 @@ class JarvisApp:
             audio_thread.join(timeout=0)
         end_ts = time.monotonic()
         logger.info("Cinematic startup completed in %.2fs", end_ts - start_ts)
+
+    def _start_voice_capture(self, wait_for: Optional[threading.Thread] = None) -> None:
+        if self._voice_thread and self._voice_thread.is_alive():
+            return
+
+        def _runner() -> None:
+            if wait_for:
+                wait_for.join()
+            try:
+                text = listen_for_command()
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Voice capture failed: %s", exc)
+                return
+
+            if text:
+                logger.info("Voice input received; routing command.")
+                self._events.emit("command_received", {"text": text})
+            else:
+                logger.info("No voice command captured; waiting for typed input.")
+
+        self._voice_thread = threading.Thread(target=_runner, name="voice-listener", daemon=True)
+        self._voice_thread.start()
 
     def _handle_command(self, payload: dict) -> None:
         interaction_steps = []
