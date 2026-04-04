@@ -15,8 +15,9 @@ logger = get_logger("SENTINEL_FIXER")
 class SentinelFixer(threading.Thread):
     """Wait for log error events and suggest a fix."""
 
-    def __init__(self, log_path: str = "assets/logs/jarvis.log"):
+    def __init__(self, event_bus=None, log_path: str = "assets/logs/jarvis.log"):
         super().__init__(daemon=True, name="SentinelFixer")
+        self._events = event_bus
         self.log_path = log_path
         self._stop_event = threading.Event()
         self._last_position = 0
@@ -44,7 +45,7 @@ class SentinelFixer(threading.Thread):
                 self._last_position = f.tell()
 
                 for line in new_lines:
-                    if " - ERROR - " in line:
+                    if " - ERROR - " in line and "SENTINEL_FIXER" not in line and "HTTP Request: POST" not in line:
                         self._analyze_error(line)
 
             time.sleep(1)
@@ -68,13 +69,12 @@ class SentinelFixer(threading.Thread):
             logger.info("[SENTINEL] Fix Recommendation: %s", final_recommendation)
             
             # Here we could emit an event for the HUD visualization
-            from utils.events import get_event_bus
-            bus = get_event_bus()
-            bus.emit("sentinel_fix_ready", {
-                "error": error_line.strip(),
-                "recommendation": final_recommendation,
-                "auto_fixed": "Auto-repaired" in fix_result
-            })
+            if self._events:
+                self._events.emit("sentinel_fix_ready", {
+                    "error": error_line.strip(),
+                    "recommendation": final_recommendation,
+                    "auto_fixed": "Auto-repaired" in fix_result
+                })
             
         except Exception as e:
             logger.error("Sentinel failed to analyze error: %s", e)
