@@ -12,8 +12,11 @@ from core.startup import start_startup_sequence
 from memory.memory_store import get_recent_history, get_relevant_context, save_interaction
 from triggers.clap_detector import ClapDetector
 from ui.application import launch_ui
+from utils.logger import get_logger
 from utils import EventBus
 from brain.ai_engine import interpret_command
+
+logger = get_logger(__name__)
 
 
 class JarvisApp:
@@ -32,7 +35,7 @@ class JarvisApp:
     def _handle_activation(self) -> None:
         if self._activation_event.is_set():
             return
-        print("Double clap detected. Preparing cinematic startup...")
+        logger.info("Double clap detected. Preparing cinematic startup...")
         self._activation_event.set()
         self._clap_detector.stop()
 
@@ -41,7 +44,7 @@ class JarvisApp:
             try:
                 self._clap_detector.start()
             except Exception as exc:  # noqa: BLE001
-                print(f"Clap detector failed: {exc}")
+                logger.error("Clap detector failed: %s", exc)
 
         self._listener_thread = threading.Thread(target=_runner, name="clap-listener", daemon=True)
         self._listener_thread.start()
@@ -52,13 +55,13 @@ class JarvisApp:
             if self.auto_start:
                 self._activation_event.set()
             else:
-                print("Listening for a double clap to start JARVIS-X...")
+                logger.info("Listening for a double clap to start JARVIS-X...")
                 self._start_clap_listener()
 
             self._activation_event.wait()
             self._start_cinematic_sequence()
         except KeyboardInterrupt:
-            print("Shutting down...")
+            logger.info("Shutting down...")
         finally:
             self._shutdown()
 
@@ -68,17 +71,18 @@ class JarvisApp:
         try:
             launch_ui(self._events)
         except Exception as exc:  # noqa: BLE001
-            print(f"UI launch failed: {exc}")
+            logger.error("UI launch failed: %s", exc)
         if audio_thread and audio_thread.is_alive():
             audio_thread.join(timeout=0)
         end_ts = time.monotonic()
-        print(f"Cinematic startup completed in {end_ts - start_ts:.2f}s")
+        logger.info("Cinematic startup completed in %.2fs", end_ts - start_ts)
 
     def _handle_command(self, payload: dict) -> None:
         interaction_steps = []
         final_result = None
         try:
             text = payload.get("text", "")
+            logger.info("Received command: %s", text)
             result = route_command(text)
             if result.get("action") == "unknown":
                 history_entries = get_recent_history()
@@ -115,6 +119,7 @@ class JarvisApp:
             extra = result.get("extra", {})
 
             if action in ACTION_REGISTRY:
+                logger.info("Executing action: %s target=%s", action, target)
                 exec_result = execute_action(action, target, extra)
                 result["exec_result"] = exec_result
                 result["message"] = exec_result.get("message", result.get("message", ""))
@@ -131,12 +136,12 @@ class JarvisApp:
             final_result = result
         except Exception as exc:  # noqa: BLE001
             final_result = {"action": "error", "message": str(exc), "type": "error"}
-            print(f"Command handling failed: {exc}")
+            logger.error("Command handling failed: %s", exc)
         finally:
             try:
                 save_interaction(payload.get("text", ""), interaction_steps, final_result or {})
             except Exception as exc:  # noqa: BLE001
-                print(f"Memory persistence failed: {exc}")
+                logger.error("Memory persistence failed: %s", exc)
 
     def _execute_step(self, step: dict, previous_result: Optional[dict] = None) -> dict:
         action = step.get("action", "")

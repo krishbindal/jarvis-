@@ -6,9 +6,11 @@ import json
 from typing import Any, Dict, Iterable
 
 import requests
+from utils.logger import get_logger
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL = "llama3"
+logger = get_logger(__name__)
 
 SYSTEM_PROMPT = """
 You are Jarvis AI.
@@ -124,6 +126,7 @@ def interpret_command(
         "stream": False,
     }
     try:
+        logger.info("Sending prompt to AI model")
         resp = requests.post(OLLAMA_URL, json=payload, timeout=15)
         resp.raise_for_status()
         data = resp.json()
@@ -132,4 +135,5 @@ def interpret_command(
         validated = _validate_steps(parsed)
         return validated
     except Exception as exc:  # noqa: BLE001
+        logger.error("AI interpretation failed: %s", exc)
         return {"steps": [], "type": "ai", "message": f"AI failed: {exc}"}

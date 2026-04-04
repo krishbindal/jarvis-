@@ -8,9 +8,12 @@ from typing import Dict
 
 import requests
 import yt_dlp
+from utils.logger import get_logger
 
 DEFAULT_DOWNLOAD_DIR = Path("~/Downloads").expanduser()
 DEFAULT_DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+logger = get_logger(__name__)
 
 
 def _save_path_from_url(url: str, suffix: str | None = None) -> Path:
@@ -22,6 +25,7 @@ def _save_path_from_url(url: str, suffix: str | None = None) -> Path:
 
 def download_file(url: str) -> Dict:
     try:
+        logger.info("Downloading file: %s", url)
         path = _save_path_from_url(url)
         with requests.get(url, stream=True, timeout=30) as resp:
             resp.raise_for_status()
@@ -37,11 +41,13 @@ def download_file(url: str) -> Dict:
             "output": str(path),
         }
     except Exception as exc:  # noqa: BLE001
+        logger.error("Download failed for %s: %s", url, exc)
         return {"success": False, "status": "error", "message": f"Download failed: {exc}"}
 
 
 def download_video(url: str) -> Dict:
     try:
+        logger.info("Downloading video: %s", url)
         out_tpl = str(DEFAULT_DOWNLOAD_DIR / "%(title)s.%(ext)s")
         ydl_opts = {
             "outtmpl": out_tpl,
@@ -59,4 +65,5 @@ def download_video(url: str) -> Dict:
             "output": filename,
         }
     except Exception as exc:  # noqa: BLE001
+        logger.error("Video download failed for %s: %s", url, exc)
         return {"success": False, "status": "error", "message": f"Video download failed: {exc}"}
