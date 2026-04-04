@@ -171,28 +171,44 @@ def route_command(text: str) -> Dict[str, str]:
         if target:
             return _build("open_app", target, f"Opening {target}")
 
-    # Media Controls
-    media_match = re.match(r"^(play|pause|stop|next song|previous song|volume up|volume down|mute)$", normalized)
-    if media_match:
-        target = media_match.group(1).replace(" song", "").replace(" ", "_")
-        return _build("media_control", target, f"Executing media control: {target}")
+    # Media Controls — natural language variants
+    _MEDIA_KEYWORDS = {
+        "play":         "play",
+        "pause":        "pause",
+        "stop":         "stop",
+        "next":         "next",
+        "previous":     "previous",
+        "skip":         "next",
+        "volume up":    "volume_up",
+        "turn up":      "volume_up",
+        "louder":       "volume_up",
+        "volume down":  "volume_down",
+        "turn down":    "volume_down",
+        "quieter":      "volume_down",
+        "mute":         "mute",
+        "unmute":       "mute",
+    }
+    for phrase, action_key in _MEDIA_KEYWORDS.items():
+        if re.search(rf"\b{re.escape(phrase)}\b", normalized):
+            # Make sure it's not an 'open app' command that also contains these words
+            if not re.match(r"^(open|launch|start)\b", normalized):
+                return _build("media_control", action_key, f"Executing media control: {action_key}")
 
-    # Power State
-    power_match = re.match(r"^(lock pc|lock computer|sleep pc|sleep computer|hibernate)$", normalized)
-    if power_match:
-        target = "sleep" if "sleep" in normalized else "lock"
-        return _build("power_state", target, f"Executing power state: {target}")
+    # Power State — natural language variants
+    if re.search(r"\b(lock|lock\s+(pc|computer|screen|workstation))\b", normalized):
+        return _build("power_state", "lock", "Locking workstation")
+    if re.search(r"\b(sleep|suspend|hibernate)\s*(pc|computer|laptop)?\b", normalized):
+        return _build("power_state", "sleep", "Putting system to sleep")
 
     # Vision / Screen Capture
-    vision_match = re.match(r"^(capture screen|take screenshot|screenshot|what is on my screen|see my screen)$", normalized)
-    if vision_match:
+    if re.search(r"\b(capture screen|take screenshot|screenshot|what is on my screen|see my screen|what do you see)\b", normalized):
         return _build("capture_screen", "", "Capturing screen context")
 
-    # Web Intelligence 
-    search_match = re.match(r"^(search for|search the web for|what is|who is|look up|google)\s+(.+)$", normalized)
+    # Web Intelligence
+    search_match = re.match(r"^(search for|search the web for|search|what is|who is|look up|google|search google)\s+(.+)$", normalized)
     if search_match:
         target = search_match.group(2).strip()
         if target:
             return _build("quick_search", target, f"Searching web for: {target}")
 
-    return _build("unknown", "", "Command not recognized. Try 'open youtube' or 'open folder <path>'.")
+    return _build("unknown", "", "Command not recognized. Try 'open youtube' or 'pause music'.")

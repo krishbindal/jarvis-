@@ -1,4 +1,10 @@
-"""Configuration defaults for JARVIS-X Phase 1."""
+"""Configuration defaults for JARVIS-X - Dexter Copilot."""
+
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Clap detection
 CLAP_THRESHOLD = 0.35
@@ -8,10 +14,22 @@ CLAP_COOLDOWN_S = 2.5
 CLAP_CALIBRATION_S = 2.0
 
 # Voice
-VOICE_MODEL_PATH = "voice/model"
+VOICE_MODEL_PATH = os.getenv("VOICE_MODEL_PATH", "voice/model")
+
+# AI Models
+MODEL_NAME = os.getenv("MODEL_NAME", "llama3")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 # Integrations and execution
-N8N_WEBHOOK_URL = "https://your-n8n-url/webhook/jarvis"
-SAFE_DIRECTORIES = ["C:/Users", "~/Downloads"]
-MODEL_NAME = "llama3"
+N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "https://your-n8n-url/webhook/jarvis")
+SAFE_DIRECTORIES = [
+    os.path.expanduser("~/Downloads"),
+    os.path.expanduser("~/Desktop"),
+    os.path.expanduser("~/Documents"),
+    "C:/Users"
+]
 REQUEST_TIMEOUT = 10
+
+# Logging
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
