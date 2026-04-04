@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Jarvis-themed UI with command emission and logging."""
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPalette, QPainter, QPen
 from PySide6.QtWidgets import (
@@ -14,6 +16,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from utils import EventBus
+
 
 ACCENT = "#00ffff"
 BACKGROUND = "#000000"
@@ -22,12 +26,14 @@ BACKGROUND = "#000000"
 class JarvisWindow(QMainWindow):
     """Futuristic themed window for JARVIS-X."""
 
-    def __init__(self) -> None:
+    def __init__(self, event_bus: EventBus) -> None:
         super().__init__()
+        self._events = event_bus
         self.setWindowTitle("JARVIS-X")
         self.setMinimumSize(960, 640)
         self._apply_palette()
         self._build_layout()
+        self._events.subscribe("command_result", self._on_command_result)
 
     def _apply_palette(self) -> None:
         palette = QPalette()
@@ -59,7 +65,7 @@ class JarvisWindow(QMainWindow):
         hud = HUDWidget()
         hud.setFixedHeight(240)
 
-        command_input = QLineEdit()
+        self.command_input = QLineEdit()
         command_input.setPlaceholderText("Type a command or speak after the chime...")
         command_input.setStyleSheet(
             f"""
@@ -76,6 +82,8 @@ class JarvisWindow(QMainWindow):
             }}
             """
         )
+
+        self.command_input.returnPressed.connect(self._emit_command)
 
         execute = QPushButton("Engage")
         execute.setCursor(Qt.PointingHandCursor)
@@ -97,19 +105,21 @@ class JarvisWindow(QMainWindow):
             """
         )
 
+        execute.clicked.connect(self._emit_command)
+
         command_row = QHBoxLayout()
         command_row.setSpacing(10)
-        command_row.addWidget(command_input, stretch=1)
+        command_row.addWidget(self.command_input, stretch=1)
         command_row.addWidget(execute)
 
         log_label = QLabel("Command Log")
         log_label.setStyleSheet(f"color: {ACCENT}; font-size: 13px;")
 
-        console = QTextEdit()
-        console.setReadOnly(True)
-        console.setPlaceholderText("System logs and responses will appear here.")
-        console.setFrameStyle(QFrame.NoFrame)
-        console.setStyleSheet(
+        self.console = QTextEdit()
+        self.console.setReadOnly(True)
+        self.console.setPlaceholderText("System logs and responses will appear here.")
+        self.console.setFrameStyle(QFrame.NoFrame)
+        self.console.setStyleSheet(
             """
             QTextEdit {
                 background: #050b11;
@@ -126,10 +136,30 @@ class JarvisWindow(QMainWindow):
         layout.addWidget(hud)
         layout.addLayout(command_row)
         layout.addWidget(log_label)
-        layout.addWidget(console, stretch=1)
+        layout.addWidget(self.console, stretch=1)
 
         main.setLayout(layout)
         self.setCentralWidget(main)
+
+    def _emit_command(self) -> None:
+        text = self.command_input.text().strip()
+        if not text:
+            return
+        self._append_log(f"YOU: {text}")
+        self.command_input.clear()
+        self._events.emit("command_received", {"text": text})
+        self.status_label.setText("Status: Processing command...")
+
+    def _on_command_result(self, payload: dict) -> None:
+        message = payload.get("message") or "Command processed."
+        action = payload.get("action", "")
+        target = payload.get("target", "")
+        detail = f"{message} ({action} -> {target})".strip()
+        self._append_log(f"SYSTEM: {detail}")
+        self.status_label.setText("Status: Idle")
+
+    def _append_log(self, line: str) -> None:
+        self.console.append(line)
 
 
 class HUDWidget(QWidget):

@@ -6,6 +6,7 @@ import threading
 import time
 from typing import Optional
 
+from core.command_router import route_command
 from core.startup import start_startup_sequence
 from triggers.clap_detector import ClapDetector
 from ui.application import launch_ui
@@ -20,6 +21,7 @@ class JarvisApp:
         self._activation_event = threading.Event()
         self._events = EventBus()
         self._events.subscribe("jarvis_wake", self._handle_activation)
+        self._events.subscribe("command_received", self._handle_command)
         self._clap_detector = ClapDetector(event_bus=self._events)
         self._listener_thread: Optional[threading.Thread] = None
 
@@ -60,13 +62,21 @@ class JarvisApp:
         start_ts = time.monotonic()
         audio_thread = start_startup_sequence()
         try:
-            launch_ui()
+            launch_ui(self._events)
         except Exception as exc:  # noqa: BLE001
             print(f"UI launch failed: {exc}")
         if audio_thread and audio_thread.is_alive():
             audio_thread.join(timeout=0)
         end_ts = time.monotonic()
         print(f"Cinematic startup completed in {end_ts - start_ts:.2f}s")
+
+    def _handle_command(self, payload: dict) -> None:
+        try:
+            text = payload.get("text", "")
+            result = route_command(text)
+            self._events.emit("command_result", result)
+        except Exception as exc:  # noqa: BLE001
+            print(f"Command handling failed: {exc}")
 
     def _shutdown(self) -> None:
         try:
