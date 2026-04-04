@@ -1,3 +1,10 @@
+"""
+JARVIS-X Phase 18: Premium TTS Engine (The "Voice")
+
+Uses Microsoft Edge TTS (free, no API key) with high-quality neural voices.
+Integrates with the EventBus to signal overlay state changes (speaking/idle).
+"""
+
 import asyncio
 import edge_tts
 import pygame
@@ -8,58 +15,108 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Premium voice selection (Indian English or UK Male for Jarvis feel)
-# Options: en-IN-NeerjaNeural, en-IN-PrabhatNeural, en-GB-RyanNeural
-VOICE = "en-GB-RyanNeural" 
+# Premium voice options:
+#   en-GB-RyanNeural     — British male (JARVIS classic)
+#   en-US-GuyNeural      — American male (calm professional)
+#   en-IN-PrabhatNeural  — Indian English male
+#   en-GB-SoniaNeural    — British female (Friday style)
+VOICE = "en-GB-RyanNeural"
+RATE = "+5%"     # Slightly faster for responsiveness
+PITCH = "+0Hz"   # Natural pitch
+
 
 class TTSEngine:
-    """Asynchronous TTS engine using Edge-TTS and Pygame."""
+    """Asynchronous TTS engine using Edge-TTS and Pygame with overlay integration."""
 
-    def __init__(self):
-        pygame.mixer.init()
+    def __init__(self, event_bus=None) -> None:
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+        except Exception:
+            pygame.mixer.init()
+
         self._lock = threading.Lock()
         self._is_speaking = False
+        self._events = event_bus
 
-    async def _amain(self, text: str, output_file: str) -> None:
-        communicate = edge_tts.Communicate(text, VOICE)
+    @property
+    def is_speaking(self) -> bool:
+        return self._is_speaking
+
+    async def _synthesize(self, text: str, output_file: str) -> None:
+        """Generate speech audio file using Edge TTS."""
+        communicate = edge_tts.Communicate(text, VOICE, rate=RATE, pitch=PITCH)
         await communicate.save(output_file)
 
-    def speak(self, text: str):
-        """Thread-safe call to speak text."""
+    def speak(self, text: str) -> None:
+        """Thread-safe call to speak text with overlay state signaling."""
         if not text:
             return
-        
+
         def _speak_thread():
             with self._lock:
+                self._is_speaking = True
+
+                # Signal overlay: speaking
+                if self._events:
+                    self._events.emit("overlay_state", {
+                        "state": "speaking",
+                        "text": text[:40]
+                    })
+
                 try:
                     # 1. Generate Audio
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
                         tmp_path = tmp.name
-                    
-                    asyncio.run(self._amain(text, tmp_path))
-                    
+
+                    asyncio.run(self._synthesize(text, tmp_path))
+
                     # 2. Play Audio
                     pygame.mixer.music.load(tmp_path)
                     pygame.mixer.music.play()
-                    
+
                     while pygame.mixer.music.get_busy():
                         pygame.time.Clock().tick(10)
-                        
+
                     # 3. Cleanup
                     pygame.mixer.music.unload()
                     if os.path.exists(tmp_path):
                         os.remove(tmp_path)
-                        
+
                 except Exception as e:
                     logger.error(f"TTS Synthesis failed: {e}")
+                finally:
+                    self._is_speaking = False
+                    # Signal overlay: back to idle
+                    if self._events:
+                        self._events.emit("overlay_state", {"state": "idle"})
 
         threading.Thread(target=_speak_thread, daemon=True).start()
 
+    def stop(self) -> None:
+        """Stop any active playback."""
+        try:
+            if pygame.mixer.music.get_busy():
+                pygame.mixer.music.stop()
+        except Exception:
+            pass
+
+
 # Global instance
 _engine = None
+_event_bus_ref = None
 
-def speak(text: str):
+
+def init_tts(event_bus=None) -> None:
+    """Initialize the TTS engine with an optional event bus for overlay integration."""
+    global _engine, _event_bus_ref
+    _event_bus_ref = event_bus
+    _engine = TTSEngine(event_bus=event_bus)
+
+
+def speak(text: str) -> None:
+    """Speak text using the global TTS engine."""
     global _engine
     if _engine is None:
-        _engine = TTSEngine()
+        _engine = TTSEngine(event_bus=_event_bus_ref)
     _engine.speak(text)

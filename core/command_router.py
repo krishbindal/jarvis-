@@ -20,6 +20,7 @@ from core.command_spec import COMMAND_SPEC
 from core.network_spec import NETWORK_SPEC
 from core.command_parser import normalize, split_multi_step, session
 from core.command_cache import route_cache
+from skills import match_skill
 
 # ─────────────────────────────────────────────────
 # Extensible Lookup Tables (not hardcoded logic)
@@ -356,7 +357,16 @@ def _route_single(normalized: str) -> Dict:
         if q:
             return _build("quick_search", q, f"Searching web for: {q}")
 
-    # ── 13. Fallback → unknown (will be sent to AI) ──────────
+    # ── 13. Plugin/Skill System (Phase 26) ────────────────────
+    skill_match = match_skill(normalized)
+    if skill_match:
+        return _build(
+            f"skill:{skill_match['skill_name']}",
+            normalized,
+            skill_match['description'],
+        )
+
+    # ── 14. Fallback → unknown (will be sent to AI) ──────────
     return _build("unknown", "", "Command not recognized.")
 
 
