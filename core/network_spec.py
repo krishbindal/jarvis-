@@ -7,6 +7,9 @@ NETWORK_SPEC = [
         "phrases": [
             "download {url}",
             "download file {url}",
+            "download file from {url}",
+            "download",
+            "download file"
         ],
     },
     {
@@ -15,6 +18,8 @@ NETWORK_SPEC = [
         "phrases": [
             "download video {url}",
             "download from {url}",
+            "download video",
+            "download youtube video"
         ],
     },
     {
@@ -23,6 +28,8 @@ NETWORK_SPEC = [
         "phrases": [
             "convert {path} to mp3",
             "download {url} to mp3",
+            "convert to mp3",
+            "convert audio to mp3"
         ],
     },
     {
@@ -30,6 +37,7 @@ NETWORK_SPEC = [
         "type": "conversion",
         "phrases": [
             "convert {path} to pdf",
+            "convert to pdf"
         ],
-    },
+    }
 ]
