@@ -16,6 +16,8 @@ import traceback
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from skills import execute_skill
+
 from executor.conversion_executor import convert_to_mp3, convert_to_pdf
 from executor.download_executor import download_file, download_video
 from executor.n8n_executor import trigger_workflow
@@ -224,6 +226,11 @@ def execute_action(
     All execution is wrapped in _safe_exec for Phase 7 error handling.
     """
     extra = extra or {}
+
+    # ── skill:* actions → route to Plugin System (Phase 26) ──
+    if action.startswith("skill:"):
+        skill_name = action.split(":", 1)[1]
+        return _safe_exec(execute_skill, skill_name, target, extra)
 
     # ── open_dynamic: special handler needing (target, extra) ─
     if action == "open_dynamic":

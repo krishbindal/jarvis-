@@ -7,6 +7,14 @@ Phase 5:  Multi-step command execution
 Phase 6:  Context awareness (session context)
 Phase 8:  Structured logging ([INPUT] [PARSED] [ACTION] [EXECUTION] [ERROR])
 Phase 12: Universal AI fallback
+Phase 16: Multimodal Vision (background screen awareness)
+Phase 17: Floating Overlay HUD
+Phase 18: Premium Edge-TTS with overlay state signaling
+Phase 19: Proactive Intelligence loop
+Phase 20: "Hey Jarvis" Wake Word
+Phase 22: Clipboard Intelligence
+Phase 26: Plugin/Skill System
+Phase 27: Conversation Personality
 """
 
 import threading
@@ -20,13 +28,17 @@ from core.command_parser import session
 from core.command_cache import route_cache
 from core.startup import start_startup_sequence
 from memory.memory_store import get_recent_history, get_relevant_context, save_interaction
+from memory.personality import get_personality_context, learn_from_interaction
 from triggers.clap_detector import ClapDetector
+from triggers.wake_word import WakeWordDetector
+from triggers.clipboard_monitor import ClipboardMonitor
 from ui.application import launch_ui
 from voice.voice_input import VoiceListener
 from utils.logger import get_logger
 from utils import EventBus
 from brain.ai_engine import interpret_command
-from voice.tts_engine import speak
+from brain.vision_provider import get_vision_provider
+from voice.tts_engine import speak, init_tts
 
 logger = get_logger(__name__)
 
@@ -45,14 +57,31 @@ class JarvisApp:
         self.voice = VoiceListener(self._events)
         self.stop_on_error: bool = True
 
+        # Phase 16: Vision Provider
+        self._vision = get_vision_provider()
+
+        # Phase 18: Initialize TTS with event bus for overlay integration
+        init_tts(event_bus=self._events)
+
+        # Phase 19: Proactivity control
+        self._proactive_thread: Optional[threading.Thread] = None
+        self._proactive_running = False
+
+        # Phase 20: Wake Word Detector
+        self._wake_word = WakeWordDetector(event_bus=self._events)
+
+        # Phase 22: Clipboard Monitor
+        self._clipboard = ClipboardMonitor(event_bus=self._events)
+
     # ─── Activation ───────────────────────────────────────────
 
     def _handle_activation(self) -> None:
         if self._activation_event.is_set():
             return
-        logger.info("Double clap detected. Preparing cinematic startup...")
+        logger.info("Wake signal detected. Preparing cinematic startup...")
         self._activation_event.set()
         self._clap_detector.stop()
+        self._wake_word.stop()
 
     def _start_clap_listener(self) -> None:
         def _runner() -> None:
@@ -70,8 +99,9 @@ class JarvisApp:
             if self.auto_start:
                 self._activation_event.set()
             else:
-                logger.info("Listening for a double clap to start JARVIS-X...")
+                logger.info("Listening for 'Hey Jarvis' or double clap...")
                 self._start_clap_listener()
+                self._wake_word.start()  # Phase 20
 
             self._activation_event.wait()
             self._start_cinematic_sequence()
@@ -84,6 +114,27 @@ class JarvisApp:
         start_ts = time.monotonic()
         audio_thread = start_startup_sequence()
         self.voice.start()
+
+        # Phase 16: Start background vision provider
+        self._vision.start()
+        logger.info("[VISION] Background vision provider initiated.")
+
+        # Phase 19: Start proactive intelligence loop
+        self._start_proactive_loop()
+
+        # Phase 22: Start clipboard monitor
+        self._clipboard.start()
+        logger.info("[CLIPBOARD] Monitor started.")
+
+        # Phase 26: Log loaded skills
+        try:
+            from skills import list_skills
+            skills = list_skills()
+            if skills:
+                logger.info("[SKILLS] %d skills loaded: %s", len(skills), [s['name'] for s in skills])
+        except Exception:
+            pass
+
         try:
             launch_ui(self._events)
         except Exception as exc:
@@ -114,6 +165,9 @@ class JarvisApp:
             # ── [INPUT] ──────────────────────────────────────
             source = payload.get("source", "text")
             logger.info("[INPUT] source=%s text='%s'", source, text)
+
+            # Signal overlay: thinking
+            self._events.emit("overlay_state", {"state": "thinking", "text": text[:40]})
 
             # ── [PARSED] ─────────────────────────────────────
             route_result = route_command(text)
@@ -197,11 +251,20 @@ class JarvisApp:
             except Exception as exc:
                 logger.error("[ERROR] Memory persistence failed: %s", exc)
 
+            # Phase 27: Learn personality from this interaction
+            try:
+                user_text = payload.get("text", "")
+                ai_msg = (final_result or {}).get("message", "")
+                if user_text:
+                    learn_from_interaction(user_text, ai_msg)
+            except Exception:
+                pass
+
     # ─── Multi-Step Execution (Phase 5) ──────────────────────
 
     def _execute_multi_step(self, steps: List[dict], text: str, payload: dict) -> None:
-        """Execute a list of routed command steps sequentially."""
-        logger.info("[MULTI-STEP] Executing %d steps", len(steps))
+        """Execute a list of routed command steps sequentially (Phase 5)."""
+        logger.info("[MULTI-STEP] Executing %d steps for text='%s'", len(steps), text)
         all_interaction_steps = []
         previous = None
         final_result = {"type": "multi_step", "steps": []}
@@ -211,20 +274,28 @@ class JarvisApp:
             target = step_result.get("target", "")
             extra = step_result.get("extra", {})
 
-            logger.info("[MULTI-STEP %d/%d] action=%s target='%s'", i + 1, len(steps), action, target)
+            # ── [PARSED] Step ────────────────────────────────
+            logger.info("[PARSED] Step %d/%d: action=%s target='%s'", i + 1, len(steps), action, target)
 
             if action == "unknown":
-                step_result, _ = self._handle_unknown(text, step_result)
+                step_result, ai_steps = self._handle_unknown(text, step_result)
+                all_interaction_steps.extend(ai_steps)
             elif action == "chat":
+                logger.info("[ACTION] Step %d: chat", i + 1)
                 exec_result = execute_action(action, target)
                 step_result["exec_result"] = exec_result
+                logger.info("[EXECUTION] Step %d: chat completed", i + 1)
                 speak(exec_result.get("message", ""))
             elif action not in ("noop",):
+                # ── [ACTION] Execute Step ────────────────────
+                logger.info("[ACTION] Step %d: %s target='%s'", i + 1, action, target)
                 exec_result = execute_action(action, target, extra, previous_result=previous)
                 step_result["exec_result"] = exec_result
                 step_result["message"] = exec_result.get("message", step_result.get("message", ""))
 
-                logger.info("[EXECUTION] step %d: status=%s", i + 1, exec_result.get("status"))
+                # ── [EXECUTION] Log Step ─────────────────────
+                logger.info("[EXECUTION] Step %d: status=%s message='%s'",
+                            i + 1, exec_result.get("status"), exec_result.get("message", ""))
 
                 all_interaction_steps.append({
                     "action": action, "target": target,
@@ -245,7 +316,7 @@ class JarvisApp:
 
         self._events.emit("command_result", final_result)
 
-        # Speak the last step's message
+        # Speak the last step's message for better UX
         last_msg = final_result["steps"][-1].get("message", "") if final_result["steps"] else ""
         if last_msg:
             speak(last_msg)
@@ -338,12 +409,66 @@ class JarvisApp:
             return {"error": "No valid steps"}
         return {"steps": deduped}
 
+    # ─── Proactive Intelligence (Phase 19) ────────────────────
+
+    def _start_proactive_loop(self) -> None:
+        """Start the background proactivity loop."""
+        self._proactive_running = True
+        self._proactive_thread = threading.Thread(
+            target=self._proactive_worker, name="proactive-loop", daemon=True
+        )
+        self._proactive_thread.start()
+        logger.info("[PROACTIVE] Intelligence loop started.")
+
+    def _proactive_worker(self) -> None:
+        """Background worker that periodically checks vision context."""
+        # Wait for system to stabilize after startup
+        time.sleep(30)
+
+        while self._proactive_running:
+            try:
+                # Get the latest visual context from the vision provider
+                visual = self._vision.last_summary
+                if visual and visual != "No visual context yet.":
+                    logger.info("[PROACTIVE] Visual context: %s", visual[:80])
+                    # Inject into session for future command awareness
+                    session.record("vision_observe", visual[:120])
+            except Exception as e:
+                logger.warning("[PROACTIVE] Loop error: %s", e)
+
+            # Check every 2 minutes
+            for _ in range(120):
+                if not self._proactive_running:
+                    return
+                time.sleep(1)
+
     # ─── Shutdown ────────────────────────────────────────────
 
     def _shutdown(self) -> None:
         # Log cache stats on shutdown
         stats = route_cache.stats
         logger.info("[PERF] Cache stats: %s", stats)
+
+        # Stop proactive loop
+        self._proactive_running = False
+
+        # Stop vision provider
+        try:
+            self._vision.stop()
+        except Exception as exc:
+            logger.error("Error stopping vision provider: %s", exc)
+
+        # Stop clipboard monitor (Phase 22)
+        try:
+            self._clipboard.stop()
+        except Exception as exc:
+            logger.error("Error stopping clipboard monitor: %s", exc)
+
+        # Stop wake word detector (Phase 20)
+        try:
+            self._wake_word.stop()
+        except Exception as exc:
+            logger.error("Error stopping wake word: %s", exc)
 
         try:
             self._clap_detector.stop()

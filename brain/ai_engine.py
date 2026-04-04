@@ -8,8 +8,11 @@ import os
 from typing import Any, Dict, Iterable
 
 import requests
+import google.generativeai as genai
+from groq import Groq
+
 from utils.logger import get_logger
-from config import MODEL_NAME
+from config import MODEL_NAME, GEMINI_API_KEY, GROQ_API_KEY
 from utils.system_context import get_system_stats
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
@@ -168,27 +171,75 @@ def interpret_command(
     history_text = _format_history(history)
     relevant_text = _format_relevant(relevant)
     
-    # If the user asks "what's on my screen" or "explain this screen", 
-    # we should handle it specifically or inform the AI it can 'see'.
-    screen_context = ""
-    if any(k in user_input.lower() for k in ["screen", "see", "looking at", "this"]):
-        analysis = describe_screen("Analyze this screen carefully and describe what's happening. If there's code, identify the language and purpose.")
-        screen_context = f"\n\nCURRENT VISUAL CONTEXT (From your vision module):\n{analysis}"
-
-    payload = {
-        "model": MODEL_NAME,
-        "prompt": f"{SYSTEM_PROMPT}\n{sys_context}\n\nUser history:\n{history_text}\n\nRelevant past actions:\n{relevant_text}{screen_context}\n\nUser: {user_input}\nAssistant:",
-        "stream": False,
-    }
+    # Phase 27: Inject personality context
+    personality_ctx = ""
     try:
-        logger.info("Sending prompt to AI model")
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=20)
+        from memory.personality import get_personality_context
+        personality_ctx = get_personality_context()
+        if personality_ctx:
+            personality_ctx = f"\n\n{personality_ctx}"
+    except Exception:
+        pass
+
+    # Phase 16: Always inject background vision context if available
+    screen_context = ""
+    try:
+        from brain.vision_provider import get_visual_context
+        bg_visual = get_visual_context()
+        if bg_visual and bg_visual != "No visual context yet.":
+            screen_context = f"\n\nBACKGROUND VISUAL CONTEXT (auto-captured):\n{bg_visual}"
+    except Exception:
+        pass
+
+    # Additional on-demand screen analysis for explicit screen questions
+    if any(k in user_input.lower() for k in ["screen", "see", "looking at", "this"]):
+        analysis = describe_screen("Analyze this screen carefully and describe what's happening.")
+        screen_context += f"\n\nLIVE SCREEN ANALYSIS (on-demand):\n{analysis}"
+
+    full_prompt = f"{SYSTEM_PROMPT}\n{sys_context}{personality_ctx}\n\nUser history:\n{history_text}\n\nRelevant past actions:\n{relevant_text}{screen_context}\n\nUser: {user_input}\nAssistant:"
+
+
+    # 1. Try Ollama (Local)
+    try:
+        logger.info("Attempting Ollama (Local AI)...")
+        payload = {"model": MODEL_NAME, "prompt": full_prompt, "stream": False}
+        resp = requests.post(OLLAMA_URL, json=payload, timeout=15)
         resp.raise_for_status()
-        data = resp.json()
-        output = data.get("response", "") or data.get("generated_text", "")
+        output = resp.json().get("response", "")
         parsed = _safe_json_extract(output)
-        validated = _validate_steps(parsed)
-        return validated
-    except Exception as exc:  # noqa: BLE001
-        logger.error("AI interpretation failed: %s", exc)
-        return {"steps": [], "type": "ai", "message": f"AI failed: {exc}"}
+        if parsed.get("steps"):
+            return _validate_steps(parsed)
+    except Exception as e:
+        logger.warning(f"Ollama failed or model missing: {e}")
+
+    # 2. Try Gemini (Cloud Fallback 1)
+    if GEMINI_API_KEY:
+        try:
+            logger.info("Attempting Gemini (Cloud AI)...")
+            genai.configure(api_key=GEMINI_API_KEY)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content(full_prompt)
+            parsed = _safe_json_extract(response.text)
+            if parsed.get("steps"):
+                return _validate_steps(parsed)
+        except Exception as e:
+            logger.warning(f"Gemini fallback failed: {e}")
+
+    # 3. Try Groq (Cloud Fallback 2)
+    if GROQ_API_KEY:
+        try:
+            logger.info("Attempting Groq (Cloud AI)...")
+            client = Groq(api_key=GROQ_API_KEY)
+            completion = client.chat.completions.create(
+                model="llama3-70b-8192",
+                messages=[{"role": "user", "content": full_prompt}],
+                temperature=0.1,
+            )
+            output = completion.choices[0].message.content
+            parsed = _safe_json_extract(output)
+            if parsed.get("steps"):
+                return _validate_steps(parsed)
+        except Exception as e:
+            logger.warning(f"Groq fallback failed: {e}")
+
+    return {"steps": [], "type": "ai", "message": "All AI providers failed. Please check connectivity or API keys."}

@@ -3,12 +3,12 @@
         "PHASE_1": {
             "name": "Ollama",
             "status": "WARNING",
-            "details": "Missing models: ['llama3', 'gemma:2b']"
+            "details": "Missing models: ['gemma:2b']"
         },
         "PHASE_2": {
             "name": "Online AI",
             "status": "WARNING",
-            "details": "Missing: ['GEMINI_API_KEY', 'OPENROUTER_API_KEY']"
+            "details": "Missing: ['OPENROUTER_API_KEY']"
         },
         "PHASE_3": {
             "name": "File System",
@@ -42,14 +42,9 @@
         }
     },
     "STATUS": "READY",
-    "FIXED": [
-        "Created directory: Downloads",
-        "Created directory: Desktop",
-        "Created directory: Projects"
-    ],
+    "FIXED": [],
     "MANUAL_ACTION": [
-        "Run 'ollama pull llama3' to enable local fallback.",
         "Run 'ollama pull gemma:2b' to enable local fallback.",
-        "Set missing keys in .env: ['GEMINI_API_KEY', 'OPENROUTER_API_KEY']"
+        "Set missing keys in .env: ['OPENROUTER_API_KEY']"
     ]
 }
