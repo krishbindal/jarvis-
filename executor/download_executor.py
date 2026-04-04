@@ -29,9 +29,15 @@ def download_file(url: str) -> Dict:
                 for chunk in resp.iter_content(chunk_size=8192):
                     if chunk:
                         fh.write(chunk)
-        return {"success": True, "message": f"Download complete: {path}", "path": str(path)}
+        return {
+            "success": True,
+            "status": "success",
+            "message": f"Download complete: {path}",
+            "path": str(path),
+            "output": str(path),
+        }
     except Exception as exc:  # noqa: BLE001
-        return {"success": False, "message": f"Download failed: {exc}"}
+        return {"success": False, "status": "error", "message": f"Download failed: {exc}"}
 
 
 def download_video(url: str) -> Dict:
@@ -45,6 +51,12 @@ def download_video(url: str) -> Dict:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
-        return {"success": True, "message": f"Download complete: {filename}", "path": filename}
+        return {
+            "success": True,
+            "status": "success",
+            "message": f"Download complete: {filename}",
+            "path": filename,
+            "output": filename,
+        }
     except Exception as exc:  # noqa: BLE001
-        return {"success": False, "message": f"Video download failed: {exc}"}
+        return {"success": False, "status": "error", "message": f"Video download failed: {exc}"}

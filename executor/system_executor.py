@@ -59,13 +59,19 @@ def list_files(path: str) -> Dict:
         target_path = path or str(_default_dir())
         target = _safe_path(target_path)
         if not target.exists() or not target.is_dir():
-            return {"success": False, "message": f"Not a directory: {target}"}
+            return {"success": False, "status": "error", "message": f"Not a directory: {target}"}
         items = sorted([p.name for p in target.iterdir()])
         preview = ", ".join(items[:5])
         suffix = "" if not preview else f": {preview}"
-        return {"success": True, "message": f"Found {len(items)} items in {target}{suffix}", "data": items}
+        return {
+            "success": True,
+            "status": "success",
+            "message": f"Found {len(items)} items in {target}{suffix}",
+            "data": items,
+            "output": items,
+        }
     except Exception as exc:  # noqa: BLE001
-        return {"success": False, "message": str(exc)}
+        return {"success": False, "status": "error", "message": str(exc)}
 
 
 def create_folder(name: str, path: str | None = None) -> Dict:
@@ -75,22 +81,22 @@ def create_folder(name: str, path: str | None = None) -> Dict:
         if not _is_safe(target):
             raise ValueError(f"Path not allowed: {target}")
         target.mkdir(parents=True, exist_ok=True)
-        return {"success": True, "message": f"Folder ensured at {target}"}
+        return {"success": True, "status": "success", "message": f"Folder ensured at {target}", "output": str(target)}
     except Exception as exc:  # noqa: BLE001
-        return {"success": False, "message": str(exc)}
+        return {"success": False, "status": "error", "message": str(exc)}
 
 
 def delete_file(path: str) -> Dict:
     try:
         target = _safe_path(path)
         if not target.exists():
-            return {"success": False, "message": f"File not found: {target}"}
+            return {"success": False, "status": "error", "message": f"File not found: {target}"}
         if target.is_dir():
-            return {"success": False, "message": "Refusing to delete directory."}
+            return {"success": False, "status": "error", "message": "Refusing to delete directory."}
         target.unlink()
-        return {"success": True, "message": f"Deleted {target}"}
+        return {"success": True, "status": "success", "message": f"Deleted {target}", "output": str(target)}
     except Exception as exc:  # noqa: BLE001
-        return {"success": False, "message": str(exc)}
+        return {"success": False, "status": "error", "message": str(exc)}
 
 
 def move_file(src: str, dest: str) -> Dict:
@@ -100,9 +106,9 @@ def move_file(src: str, dest: str) -> Dict:
         if dest_path.is_dir():
             dest_path = dest_path / source_path.name
         shutil.move(str(source_path), str(dest_path))
-        return {"success": True, "message": f"Moved to {dest_path}"}
+        return {"success": True, "status": "success", "message": f"Moved to {dest_path}", "output": str(dest_path)}
     except Exception as exc:  # noqa: BLE001
-        return {"success": False, "message": str(exc)}
+        return {"success": False, "status": "error", "message": str(exc)}
 
 
 def copy_file(src: str, dest: str) -> Dict:
@@ -112,9 +118,9 @@ def copy_file(src: str, dest: str) -> Dict:
         if dest_path.is_dir():
             dest_path = dest_path / source_path.name
         shutil.copy2(str(source_path), str(dest_path))
-        return {"success": True, "message": f"Copied to {dest_path}"}
+        return {"success": True, "status": "success", "message": f"Copied to {dest_path}", "output": str(dest_path)}
     except Exception as exc:  # noqa: BLE001
-        return {"success": False, "message": str(exc)}
+        return {"success": False, "status": "error", "message": str(exc)}
 
 
 def rename_file(path: str, new_name: str) -> Dict:
@@ -124,9 +130,15 @@ def rename_file(path: str, new_name: str) -> Dict:
         if not _is_safe(dest):
             raise ValueError(f"Path not allowed: {dest}")
         source.rename(dest)
-        return {"success": True, "message": f"Renamed to {dest.name}", "data": str(dest)}
+        return {
+            "success": True,
+            "status": "success",
+            "message": f"Renamed to {dest.name}",
+            "data": str(dest),
+            "output": str(dest),
+        }
     except Exception as exc:  # noqa: BLE001
-        return {"success": False, "message": str(exc)}
+        return {"success": False, "status": "error", "message": str(exc)}
 
 
 def search_file(name: str, root_path: str) -> Dict:
@@ -140,16 +152,22 @@ def search_file(name: str, root_path: str) -> Dict:
                 break
         preview = ", ".join([Path(m).name for m in matches[:5]])
         suffix = "" if not preview else f": {preview}"
-        return {"success": True, "message": f"Found {len(matches)} match(es){suffix}", "data": matches}
+        return {
+            "success": True,
+            "status": "success",
+            "message": f"Found {len(matches)} match(es){suffix}",
+            "data": matches,
+            "output": matches,
+        }
     except Exception as exc:  # noqa: BLE001
-        return {"success": False, "message": str(exc)}
+        return {"success": False, "status": "error", "message": str(exc)}
 
 
 def file_info(path: str) -> Dict:
     try:
         target = _safe_path(path)
         if not target.exists():
-            return {"success": False, "message": f"Path not found: {target}"}
+            return {"success": False, "status": "error", "message": f"Path not found: {target}"}
         stat = target.stat()
         info = {
             "path": str(target),
@@ -158,9 +176,9 @@ def file_info(path: str) -> Dict:
             "is_dir": target.is_dir(),
             "is_file": target.is_file(),
         }
-        return {"success": True, "message": "File info retrieved.", "data": info}
+        return {"success": True, "status": "success", "message": "File info retrieved.", "data": info, "output": info}
     except Exception as exc:  # noqa: BLE001
-        return {"success": False, "message": str(exc)}
+        return {"success": False, "status": "error", "message": str(exc)}
 
 
 def execute_file_command(action: str, target: str, extra: dict | None = None) -> Dict:
