@@ -7,14 +7,8 @@ import shutil
 from pathlib import Path
 from typing import Dict, List
 
+from config import SAFE_DIRECTORIES
 from utils.logger import get_logger
-
-SAFE_DIRECTORIES = [
-    "C:/Users",
-    "D:/Projects",
-    "~/Downloads",
-    "~/Documents",
-]
 
 logger = get_logger(__name__)
 

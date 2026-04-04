@@ -7,9 +7,9 @@ from typing import Any, Dict, Iterable
 
 import requests
 from utils.logger import get_logger
+from config import MODEL_NAME
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "llama3"
 logger = get_logger(__name__)
 
 SYSTEM_PROMPT = """
@@ -121,7 +121,7 @@ def interpret_command(
     history_text = _format_history(history)
     relevant_text = _format_relevant(relevant)
     payload = {
-        "model": MODEL,
+        "model": MODEL_NAME,
         "prompt": f"{SYSTEM_PROMPT}\nUser history:\n{history_text}\n\nRelevant past actions:\n{relevant_text}\n\nUser: {user_input}\nAssistant:",
         "stream": False,
     }

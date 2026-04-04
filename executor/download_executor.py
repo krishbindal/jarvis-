@@ -9,6 +9,7 @@ from typing import Dict
 import requests
 import yt_dlp
 from utils.logger import get_logger
+from config import REQUEST_TIMEOUT
 
 DEFAULT_DOWNLOAD_DIR = Path("~/Downloads").expanduser()
 DEFAULT_DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -27,7 +28,7 @@ def download_file(url: str) -> Dict:
     try:
         logger.info("Downloading file: %s", url)
         path = _save_path_from_url(url)
-        with requests.get(url, stream=True, timeout=10) as resp:
+        with requests.get(url, stream=True, timeout=REQUEST_TIMEOUT) as resp:
             resp.raise_for_status()
             with path.open("wb") as fh:
                 for chunk in resp.iter_content(chunk_size=8192):
