@@ -11,6 +11,12 @@
       "args": ["test_mcp_mock_server.py"],
       "enabled": true,
       "description": "Local mock server for integration testing."
+    },
+    "open-interpreter": {
+      "command": "py",
+      "args": ["-3.12", "-m", "interpreter", "--mcp"],
+      "enabled": true,
+      "description": "Open Interpreter for universal system and code execution (via Python 3.12)."
     }
   }
 }
