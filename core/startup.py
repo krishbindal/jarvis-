@@ -23,10 +23,15 @@ def _init_mixer() -> bool:
 
 
 def _play_blocking(path: Path) -> None:
-    """Play the provided audio file and block until completion."""
+    """Play the provided audio file and block until completion (max 10s)."""
     pygame.mixer.music.load(str(path))
     pygame.mixer.music.play()
+    
+    start_time = time.time()
     while pygame.mixer.music.get_busy():
+        if time.time() - start_time > 10:
+            pygame.mixer.music.fadeout(1500) # Smooth 1.5s fadeout
+            break
         time.sleep(0.05)
 
 

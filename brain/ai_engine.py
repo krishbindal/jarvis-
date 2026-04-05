@@ -114,17 +114,18 @@ def describe_screen(prompt: str = "What is on the screen?") -> str:
     try:
         from google.generativeai import types
         logger.info("[VISION] Sending screen to Gemini (Cloud)...")
-        client = genai.Client(api_key=GEMINI_API_KEY)
+        
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-2.0-flash')
         
         # Load image
         with open(img_path, "rb") as f:
             img_data = f.read()
             
-        response = client.models.generate_content(
-            model='gemini-2.0-flash',
+        response = model.generate_content(
             contents=[
                 prompt,
-                types.Part.from_bytes(data=img_data, mime_type='image/png')
+                {"mime_type": "image/png", "data": img_data}
             ]
         )
         return response.text.strip()

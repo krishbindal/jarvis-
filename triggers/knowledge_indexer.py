@@ -25,6 +25,13 @@ class KnowledgeIndexer:
         self._indexed_hashes: Set[str] = set()
         self._events = event_bus
         
+        # Phase 26: Knowledge Sources
+        self._targets = [
+            os.getcwd(),
+            str(Path.home() / "Documents")
+        ]
+        self._extensions = {".py", ".md", ".txt", ".js", ".json", ".html", ".css"}
+        
         if self._events:
             self._events.subscribe("system_shutdown", self.stop)
 

@@ -145,13 +145,16 @@ class VisionProvider:
             buf.seek(0)
 
             # Send to Gemini Vision
-            client = genai.Client(api_key=GEMINI_API_KEY)
+            genai.configure(api_key=GEMINI_API_KEY)
+            model = genai.GenerativeModel(VISION_MODEL)
             
-            response = client.models.generate_content(
-                model=VISION_MODEL,
+            # Load image from buffer
+            img_data = buf.read()
+            
+            response = model.generate_content(
                 contents=[
                     VISION_PROMPT,
-                    types.Part.from_bytes(data=buf.read(), mime_type="image/jpeg")
+                    {"mime_type": "image/jpeg", "data": img_data}
                 ]
             )
 
