@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from PySide6.QtCore import Qt, QTimer, QPoint
-from PySide6.QtGui import QColor, QFont, QPalette, QPainter, QPen, QLinearGradient
+from PySide6.QtGui import QColor, QFont, QPalette, QPainter, QPen, QLinearGradient, QTextCursor
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -45,7 +45,16 @@ class JarvisWindow(QMainWindow):
         self._load_styles()
         
         self._events.subscribe("command_result", self._on_command_result)
+        self._events.subscribe("stream_output", self._on_stream_output)
+        self._events.subscribe("cinematic_log", self._on_cinematic_log)
+        self._events.subscribe("command_progress", self._on_command_progress)
         self._drag_pos = QPoint()
+        self._streaming = False
+        self._typing_timer = QTimer(self)
+        self._typing_timer.timeout.connect(self._type_tick)
+        self._type_queue = []
+        self._current_line = ""
+        self._type_index = 0
 
     def _setup_glass_effect(self) -> None:
         """Enable Windows 11 Acrylic effect if available."""
@@ -145,9 +154,59 @@ class JarvisWindow(QMainWindow):
         action = payload.get("action", "")
         self._append_log(f"JARVIS > {message}")
         self.status_label.setText("SYSTEM READY")
+        self._streaming = False
 
     def _append_log(self, line: str) -> None:
         self.console.append(line)
+
+    def _on_stream_output(self, payload: dict) -> None:
+        token = payload.get("token", "")
+        reset = payload.get("reset", False)
+        if reset or not self._streaming:
+            self.console.append("")
+            self._streaming = True
+        cursor = self.console.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        cursor.insertText(token)
+        self.console.setTextCursor(cursor)
+
+    def _on_cinematic_log(self, payload: dict) -> None:
+        text = payload.get("text", "")
+        if not text:
+            return
+        self._queue_type_line(text)
+
+    def _on_command_progress(self, payload: dict) -> None:
+        text = payload.get("text", "")
+        if text:
+            self.status_label.setText(text.upper())
+            self._queue_type_line(f"[STATUS] {text}")
+
+    def _queue_type_line(self, text: str) -> None:
+        if self._typing_timer.isActive():
+            self._type_queue.append(text)
+            return
+        self.console.append("")
+        self._current_line = text
+        self._type_index = 0
+        self._typing_timer.start(12)
+
+    def _type_tick(self) -> None:
+        if self._type_index >= len(self._current_line):
+            self._typing_timer.stop()
+            if self._type_queue:
+                next_line = self._type_queue.pop(0)
+                self.console.append("")
+                self._current_line = next_line
+                self._type_index = 0
+                self._typing_timer.start(12)
+            return
+
+        cursor = self.console.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        cursor.insertText(self._current_line[self._type_index])
+        self.console.setTextCursor(cursor)
+        self._type_index += 1
 
 
 class HUDWidget(QWidget):
