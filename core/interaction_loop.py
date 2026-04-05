@@ -31,6 +31,11 @@ ACTION_VERBS = {
     "convert_to_mp3": "Converting",
     "convert_to_pdf": "Converting",
     "kill_process": "Stopping",
+    "type_text": "Typing",
+    "press_key": "Pressing",
+    "click": "Clicking",
+    "read_screen": "Scanning",
+    "get_active_app": "Checking",
 }
 
 
