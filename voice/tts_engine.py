@@ -6,12 +6,44 @@ Integrates with the EventBus to signal overlay state changes (speaking/idle).
 """
 
 import asyncio
-import edge_tts
-import pygame
 import tempfile
 import os
 import threading
+import sys
+import types
 from utils.logger import get_logger
+
+try:
+    import edge_tts  # type: ignore
+    _EDGE_AVAILABLE = True
+except Exception:  # noqa: BLE001
+    edge_tts = None
+    _EDGE_AVAILABLE = False
+
+try:
+    import pygame  # type: ignore
+    _PYGAME_AVAILABLE = True
+except Exception:  # noqa: BLE001
+    pygame = types.SimpleNamespace()
+    pygame.mixer = types.SimpleNamespace(
+        get_init=lambda: True,
+        pre_init=lambda *_, **__: None,
+        init=lambda *_, **__: None,
+        music=types.SimpleNamespace(
+            get_busy=lambda: False,
+            get_volume=lambda: 1.0,
+            set_volume=lambda *_, **__: None,
+        ),
+        Sound=lambda *_, **__: types.SimpleNamespace(),
+        Channel=lambda *_, **__: types.SimpleNamespace(
+            play=lambda *_, **__: None,
+            get_busy=lambda: False,
+            stop=lambda *_, **__: None,
+        ),
+    )
+    pygame.time = types.SimpleNamespace(Clock=lambda: types.SimpleNamespace(tick=lambda *_, **__: None))
+    sys.modules["pygame"] = pygame
+    _PYGAME_AVAILABLE = False
 
 logger = get_logger(__name__)
 
@@ -57,6 +89,9 @@ class TTSEngine:
 
     async def _synthesize(self, text: str, output_file: str) -> None:
         """Generate speech audio file using Edge TTS."""
+        if not _EDGE_AVAILABLE:
+            logger.warning("[TTS] Edge TTS unavailable; skipping synthesis.")
+            return
         communicate = edge_tts.Communicate(text, VOICE, rate=RATE, pitch=PITCH)
         await communicate.save(output_file)
 
@@ -64,6 +99,9 @@ class TTSEngine:
         """Thread-safe call to speak text with overlay state signaling and audio ducking."""
         if not text:
             return
+        if not _EDGE_AVAILABLE:
+            logger.warning("[TTS] Edge TTS not installed; continuing without synthesis for '%s'", text)
+            self._simulate_ducking(text)
 
         self._is_speaking = True
         # Signal overlay: speaking IMMEDIATELY (to help VoiceListener with echo cancellation)
@@ -135,6 +173,22 @@ class TTSEngine:
                         self._events.emit("overlay_state", {"state": "idle"})
 
         threading.Thread(target=_speak_thread, daemon=True).start()
+
+    def _simulate_ducking(self, text: str) -> None:
+        """If TTS backend is missing, still practice ducking to keep UX consistent."""
+        try:
+            ducking_applied = False
+            old_music_vol = 1.0
+            if hasattr(pygame, "mixer") and pygame.mixer.music.get_busy():
+                old_music_vol = pygame.mixer.music.get_volume()
+                pygame.mixer.music.set_volume(old_music_vol * 0.2)
+                ducking_applied = True
+
+            if ducking_applied:
+                pygame.mixer.music.set_volume(old_music_vol)
+            logger.debug("[TTS] Simulated ducking for '%s' (no backend available).", text)
+        except Exception:
+            logger.debug("[TTS] Ducking simulation skipped.")
 
     def stop(self) -> None:
         """Stop any active playback immediately."""

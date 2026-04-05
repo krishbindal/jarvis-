@@ -53,6 +53,7 @@ from brain.agent_planner import plan_steps
 from executor import agent_tools
 from automation.planner import build_automation_plan
 from automation.executor import execute_automation_plan
+from brain.autonomy_engine import get_autonomy_engine
 
 logger = get_logger(__name__)
 
@@ -71,6 +72,7 @@ class JarvisApp:
         self._events.subscribe("jarvis_wake", self._handle_activation)
         self._events.subscribe("command_received", self._handle_command)
         self._events.subscribe("proactive_warning", lambda msg: speak(msg))
+        self._events.subscribe("autonomy_suggestion", self._handle_autonomy_suggestion)
         
         self._clap_detector = ClapDetector(event_bus=self._events)
         self._sys_monitor = SystemMonitor(event_bus=self._events)
@@ -111,6 +113,7 @@ class JarvisApp:
         self._interactions = InteractionLoop(self._events)
         self._context = ContextState()
         self._events.subscribe("interrupt_tts", lambda *_: self._interactions.stop())
+        self._autonomy = None
 
         # Phase 26: Start MCP Hub (Open Interpreter, Playwright, etc.)
         try:
@@ -188,6 +191,9 @@ class JarvisApp:
 
         # Phase 19: Start proactive intelligence loop
         self._start_proactive_loop()
+
+        # Phase 30+: Start autonomy engine (background observer & scheduler)
+        self._start_autonomy_loop()
 
         # Phase 22: Start clipboard monitor
         self._clipboard.start()
@@ -327,6 +333,7 @@ class JarvisApp:
             if action == "stop":
                 logger.info("[ACTION] STOP! Resetting system state.")
                 self._events.emit("interrupt_tts", {"source": "app_internal"})
+                self._events.emit("interrupt_autonomy", {"source": "user"})
                 self._events.emit("overlay_state", {"state": "idle", "text": "Task Aborted."})
                 self._context.set_task(False)
                 self._context.clear()
@@ -749,6 +756,30 @@ class JarvisApp:
         """Start the background proactivity loop using ProactiveEngine."""
         get_proactive_engine(self._events).start()
 
+    def _start_autonomy_loop(self) -> None:
+        """Launch the habit observer & scheduler."""
+        try:
+            self._autonomy = get_autonomy_engine(self._events, self._context)
+            self._autonomy.start()
+        except Exception as exc:
+            logger.error("Autonomy engine failed to start: %s", exc)
+
+    def _handle_autonomy_suggestion(self, payload: dict) -> None:
+        """Surface proactive suggestions with personality-aware narration."""
+        if not payload:
+            return
+        message = payload.get("message", "")
+        if not message:
+            return
+        try:
+            self._events.emit("proactive_notification", {"message": message})
+        except Exception:
+            pass
+        try:
+            speak(message)
+        except Exception:
+            logger.debug("TTS unavailable for autonomy suggestion.")
+
 
     # ─── Shutdown ────────────────────────────────────────────
 
@@ -769,6 +800,11 @@ class JarvisApp:
             get_proactive_engine().stop()
         except Exception as exc:
             logger.error("Error stopping proactive engine: %s", exc)
+        try:
+            if self._autonomy:
+                self._autonomy.stop()
+        except Exception as exc:
+            logger.error("Error stopping autonomy engine: %s", exc)
 
         # Stop Knowledge Indexer
         try:
