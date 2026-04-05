@@ -60,6 +60,7 @@ class JarvisApp:
 
     def __init__(self, auto_start: bool = False) -> None:
         self.auto_start = auto_start
+        self._running = True
         self._activation_event = threading.Event()
         self._events = EventBus()
         self._events.subscribe("jarvis_wake", self._handle_activation)
@@ -143,8 +144,17 @@ class JarvisApp:
                 self._start_clap_listener()
                 self._wake_word.start()  # Phase 20
 
+            # Wait for activation
             self._activation_event.wait()
             self._start_cinematic_sequence()
+
+            # Keep the main thread alive for background services
+            # This ensures that even if the UI closes or fails, the voice listener,
+            # proactive engine, and other background threads keep running.
+            logger.info("Application entering resident mode. Press Ctrl+C to stop.")
+            while self._running:
+                time.sleep(1)
+
         except KeyboardInterrupt:
             logger.info("Shutting down...")
         finally:
@@ -630,6 +640,7 @@ class JarvisApp:
     # ─── Shutdown ────────────────────────────────────────────
 
     def _shutdown(self) -> None:
+        self._running = False
         # Stop File Sorcerer (Phase 23)
         try:
             self._sorcerer.stop()

@@ -80,8 +80,12 @@ class TTSEngine:
                     # Defensive: Ensure mixer is still alive before synthesis
                     if not pygame.mixer.get_init():
                         logger.warning("[TTS] Mixer was closed unexpectedly. Re-initializing...")
-                        pygame.mixer.pre_init(44100, -16, 2, 2048)
-                        pygame.mixer.init()
+                        try:
+                            pygame.mixer.pre_init(44100, -16, 2, 2048)
+                            pygame.mixer.init()
+                        except Exception as mix_err:
+                            logger.error(f"[TTS] Failed to re-initialize mixer: {mix_err}")
+                            return
 
                     # 1. Generate Audio
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:

@@ -11,7 +11,7 @@ import math
 import random
 from PySide6.QtCore import (
     Qt, QTimer, QRectF, QPropertyAnimation, QEasingCurve,
-    Property, Signal, QObject, QPointF
+    Property, Signal, QObject, QPointF, Slot
 )
 from PySide6.QtGui import (
     QColor, QPainter, QPen, QFont, QLinearGradient,
@@ -38,6 +38,13 @@ class OverlayState:
     THINKING = "thinking"
     SPEAKING = "speaking"
     OBSERVING = "observing"
+
+class OverlaySignals(QObject):
+    """Bridge for thread-safe EventBus communication."""
+    state_signal = Signal(dict)
+    result_signal = Signal(dict)
+    notification_signal = Signal(dict)
+    progress_signal = Signal(dict)
 
 class JarvisOverlay(QWidget):
     """Transparent, always-on-top floating HUD pill bar."""
@@ -67,11 +74,18 @@ class JarvisOverlay(QWidget):
         self._timer.timeout.connect(self._tick)
         self._timer.start(40) # 25 FPS – Better for low-end PCs
 
+        # Signals Bridge (more robust for experimental PySide6/Python environments)
+        self.signals = OverlaySignals()
+        self.signals.state_signal.connect(self._on_state_change)
+        self.signals.result_signal.connect(self._on_command_result)
+        self.signals.notification_signal.connect(self._on_proactive_notification)
+        self.signals.progress_signal.connect(self._on_command_progress)
+
         if self._events:
-            self._events.subscribe("overlay_state", self._on_state_change)
-            self._events.subscribe("command_result", self._on_command_result)
-            self._events.subscribe("proactive_notification", self._on_proactive_notification)
-            self._events.subscribe("command_progress", self._on_command_progress)
+            self._events.subscribe("overlay_state", self.signals.state_signal.emit)
+            self._events.subscribe("command_result", self.signals.result_signal.emit)
+            self._events.subscribe("proactive_notification", self.signals.notification_signal.emit)
+            self._events.subscribe("command_progress", self.signals.progress_signal.emit)
 
     def _position_at_top(self) -> None:
         screen = QApplication.primaryScreen()
@@ -96,11 +110,13 @@ class JarvisOverlay(QWidget):
         elif state == OverlayState.OBSERVING:
             self._status_text = "OBSERVING"
 
+    @Slot(dict)
     def _on_state_change(self, payload: dict) -> None:
         state = payload.get("state", OverlayState.IDLE)
         text = payload.get("text", "")
         self.set_state(state, text)
 
+    @Slot(dict)
     def _on_command_result(self, payload: dict) -> None:
         msg = payload.get("message", "")
         if msg:
@@ -109,6 +125,7 @@ class JarvisOverlay(QWidget):
         else:
             self.set_state(OverlayState.IDLE)
 
+    @Slot(dict)
     def _on_command_progress(self, payload: dict) -> None:
         text = payload.get("text", "")
         if text:
@@ -230,6 +247,7 @@ class JarvisOverlay(QWidget):
 
         painter.end()
 
+    @Slot(dict)
     def _on_proactive_notification(self, payload: dict) -> None:
         self._proactive_text = payload.get("message", "")
         self.set_state(OverlayState.OBSERVING)
