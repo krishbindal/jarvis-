@@ -46,6 +46,8 @@ from brain.researcher import DeepResearchAgent
 from brain.proactive_engine import get_proactive_engine
 from voice.tts_engine import speak, init_tts
 from memory.database import MemoryDB
+from core.interaction_loop import InteractionLoop
+from core.mcp_hub import get_mcp_hub
 
 logger = get_logger(__name__)
 
@@ -97,6 +99,15 @@ class JarvisApp:
         
         # Database for stats
         self._db = MemoryDB()
+        self._interactions = InteractionLoop(self._events)
+        self._events.subscribe("interrupt_tts", lambda *_: self._interactions.stop())
+
+        # Phase 26: Start MCP Hub (Open Interpreter, Playwright, etc.)
+        try:
+            self._mcp_hub = get_mcp_hub()
+            threading.Thread(target=self._mcp_hub.start, name="mcp-hub", daemon=True).start()
+        except Exception as exc:
+            logger.error("Failed to start MCP Hub: %s", exc)
 
     # ─── Activation ───────────────────────────────────────────
 
@@ -139,6 +150,12 @@ class JarvisApp:
         start_ts = time.monotonic()
         audio_thread = start_startup_sequence()
         self.voice.start()
+        try:
+            self._events.emit("cinematic_log", {"text": "Initializing modules..."})
+            self._events.emit("cinematic_log", {"text": "Connecting to AI core..."})
+            self._events.emit("cinematic_log", {"text": "System ready."})
+        except Exception:
+            pass
 
         # Phase 16: Start background vision provider
         self._vision.start()
@@ -206,12 +223,17 @@ class JarvisApp:
         """
         interaction_steps = []
         final_result = None
+        interaction_done = False
         start = time.monotonic()
 
         try:
-            text = payload.get("text", "")
-            if text:
-                text = text.lower().strip()
+            raw_text = payload.get("text", "")
+            text = raw_text.lower().strip() if raw_text else ""
+
+            self._interactions.reset()
+            if raw_text:
+                self._interactions.immediate_ack(raw_text)
+                self._interactions.stream_thinking(raw_text)
 
             # ── [INPUT] ──────────────────────────────────────
             source = payload.get("source", "text")
@@ -227,7 +249,10 @@ class JarvisApp:
             # Multi-step: route_command may return a list
             if isinstance(route_result, list):
                 # Phase 5: execute each step sequentially
-                self._execute_multi_step(route_result, text, payload)
+                result, interaction_steps = self._execute_multi_step(route_result, text, payload)
+                final_result = result
+                self._interactions.finish(result.get("message", "Sequence completed."))
+                interaction_done = True
                 return
 
             # Single-step from here
@@ -242,9 +267,8 @@ class JarvisApp:
                 result, interaction_steps = self._handle_unknown(text, result)
                 final_result = result
                 self._events.emit("command_result", result)
-                res_msg = result.get("message")
-                if res_msg:
-                    speak(res_msg)
+                self._interactions.finish(result.get("message", "Done."))
+                interaction_done = True
                 return
 
             # ── Chat (greeting) — speak immediately ──────────
@@ -254,8 +278,9 @@ class JarvisApp:
                 result["message"] = exec_result.get("message", "")
                 logger.info("[ACTION] chat → '%s'", exec_result.get("message", ""))
                 self._events.emit("command_result", result)
-                speak(exec_result.get("message", ""))
                 final_result = result
+                self._interactions.finish(result.get("message", "Done."))
+                interaction_done = True
                 return
 
             # ── [ACTION] Execute known action ────────────────
@@ -263,6 +288,7 @@ class JarvisApp:
             extra = result.get("extra", {})
 
             if action not in ("noop",):
+                self._interactions.narrate_action(action, target)
                 logger.info("[ACTION] Executing: %s target='%s'", action, target)
                 exec_result = execute_action(action, target, extra)
                 result["exec_result"] = exec_result
@@ -289,16 +315,22 @@ class JarvisApp:
 
             self._events.emit("command_result", result)
 
-            res_msg = result.get("message")
-            if res_msg:
-                speak(res_msg)
-
             final_result = result
+            if not interaction_done:
+                self._interactions.finish(result.get("message", "Done."))
+                interaction_done = True
 
         except Exception as exc:
             final_result = {"action": "error", "message": str(exc), "type": "error"}
             logger.error("[ERROR] Command handling failed: %s", exc, exc_info=True)
         finally:
+            try:
+                if not interaction_done and final_result is not None:
+                    self._interactions.finish(final_result.get("message", "Done."))
+                elif not interaction_done:
+                    self._interactions.stop()
+            except Exception:
+                self._interactions.stop()
             elapsed = time.monotonic() - start
             logger.info("[PERF] Command processed in %.3fs", elapsed)
             try:
@@ -317,7 +349,7 @@ class JarvisApp:
 
     # ─── Multi-Step Execution (Phase 5) ──────────────────────
 
-    def _execute_multi_step(self, steps: List[dict], text: str, payload: dict) -> None:
+    def _execute_multi_step(self, steps: List[dict], text: str, payload: dict) -> tuple[dict, List[dict]]:
         """Execute a list of routed command steps sequentially (Phase 5)."""
         logger.info("[MULTI-STEP] Executing %d steps for text='%s'", len(steps), text)
         all_interaction_steps = []
@@ -331,6 +363,10 @@ class JarvisApp:
 
             # ── [PARSED] Step ────────────────────────────────
             logger.info("[PARSED] Step %d/%d: action=%s target='%s'", i + 1, len(steps), action, target)
+            try:
+                self._events.emit("command_progress", {"stage": f"step_{i+1}", "text": f"{action}: {target}"})
+            except Exception:
+                pass
 
             if action == "unknown":
                 step_result, ai_steps = self._handle_unknown(text, step_result)
@@ -340,7 +376,6 @@ class JarvisApp:
                 exec_result = execute_action(action, target)
                 step_result["exec_result"] = exec_result
                 logger.info("[EXECUTION] Step %d: chat completed", i + 1)
-                speak(exec_result.get("message", ""))
             elif action not in ("noop",):
                 # ── [ACTION] Execute Step ────────────────────
                 logger.info("[ACTION] Step %d: %s target='%s'", i + 1, action, target)
@@ -375,15 +410,10 @@ class JarvisApp:
 
         self._events.emit("command_result", final_result)
 
-        # Speak the last step's message for better UX
         last_msg = final_result["steps"][-1].get("message", "") if final_result["steps"] else ""
-        if last_msg:
-            speak(last_msg)
+        final_result["message"] = last_msg or "Sequence completed."
 
-        try:
-            save_interaction(payload.get("text", ""), all_interaction_steps, final_result)
-        except Exception as exc:
-            logger.error("[ERROR] Memory persistence failed: %s", exc)
+        return final_result, all_interaction_steps
 
     # ─── AI Fallback (Phase 12) ──────────────────────────────
 
@@ -398,8 +428,6 @@ class JarvisApp:
             steps = ai_result.get("steps") or []
 
             ai_msg = ai_result.get("message")
-            if ai_msg:
-                speak(ai_msg)
 
             if steps:
                 validated = self._validate_ai_steps(steps)
@@ -429,7 +457,6 @@ class JarvisApp:
         except Exception as exc:
             logger.error("[AI-FALLBACK] AI interpretation failed: %s", exc)
             result = {"action": "error", "message": f"Sir, my AI systems encountered an error: {exc}", "type": "error"}
-            speak(result["message"])
 
         return result, interaction_steps
 
@@ -531,6 +558,13 @@ class JarvisApp:
             self._clap_detector.stop()
         except Exception as exc:
             logger.error("Error stopping clap detector: %s", exc)
+
+        # Stop MCP Hub
+        try:
+            if hasattr(self, '_mcp_hub'):
+                self._mcp_hub.stop()
+        except Exception as exc:
+            logger.error("Error stopping MCP hub: %s", exc)
 
         # Stop Sentinel Fixer
         try:
