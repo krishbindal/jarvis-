@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List
 
+from brain.structured_output import MAX_STEPS, clean_message, normalize_action_steps, parse_json_block
+
 class AIProvider(ABC):
     """Abstract Base Class for AI Engine Providers."""
     
@@ -26,29 +28,13 @@ class AIProvider(ABC):
         pass
 
 def _safe_json_extract(text: str) -> Dict[str, Any]:
-    import json
-    try:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1:
-            raise ValueError("No JSON object found")
-        snippet = text[start : end + 1]
-        return json.loads(snippet)
-    except Exception:
+    data = parse_json_block(text)
+    if not data:
         return {"steps": [], "type": "ai", "message": "AI parsing failed"}
+    return data
 
 
 def _validate_steps(data: Dict[str, Any]) -> Dict[str, Any]:
-    steps = data.get("steps", [])
-    message = data.get("message") or ""
-    if not isinstance(steps, list):
-        return {"steps": [], "type": "ai", "message": message or "AI parsing failed"}
-    cleaned = []
-    for step in steps:
-        if not isinstance(step, dict):
-            continue
-        action = step.get("action") or "unknown"
-        target = step.get("target") or ""
-        extra = step.get("extra") or {}
-        cleaned.append({"action": action, "target": target, "extra": extra})
-    return {"steps": cleaned, "type": "ai", "message": message}
+    steps = normalize_action_steps(data.get("steps"), max_steps=MAX_STEPS)
+    message = clean_message(data.get("message"), default="Done.")
+    return {"steps": steps, "type": "ai", "message": message}
