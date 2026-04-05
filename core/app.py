@@ -524,7 +524,9 @@ class JarvisApp:
         action = route_result.get("action") if isinstance(route_result, dict) else "unknown"
         if action == "unknown":
             return True
-        if self._context.has_active_context() and action in ("chat", "media_control", "noop"):
+        if self._context.has_active_context() and action in ("chat", "media_control", "noop", "quick_search"):
+            return True
+        if self._context.task_in_progress and action not in ("open_app", "open_dynamic", "open_url", "open_folder", "power_state", "system_check"):
             return True
         return False
 
@@ -537,21 +539,50 @@ class JarvisApp:
                 visual = get_visual_context()
             except Exception:
                 visual = ""
-            ctx_snapshot = self._context.snapshot()
-            steps, planner_msg = plan_steps(command, ctx_snapshot, visual)
             executed_steps = []
+            pending_steps: List[dict] = []
+            planner_msg = ""
+            feedback = ""
+            max_steps = 8
 
-            for step in steps:
+            for _ in range(max_steps):
+                if not pending_steps:
+                    ctx_snapshot = self._context.snapshot()
+                    steps, planner_msg = plan_steps(command, ctx_snapshot, visual, feedback=feedback)
+                    feedback = ""
+                    pending_steps = steps or []
+                    if not pending_steps:
+                        final_message = planner_msg or feedback or "Task complete."
+                        result_payload = {"type": "agent_loop", "steps": executed_steps, "message": final_message}
+                        self._events.emit("command_result", result_payload)
+                        self._interactions.finish(final_message)
+                        return result_payload, executed_steps
+
+                step = pending_steps.pop(0)
                 tool = step.get("tool", "")
                 reason = step.get("reason", "")
-                self._events.emit("command_progress", {"stage": "agent", "text": reason or tool})
+                if reason:
+                    self._events.emit("command_progress", {"stage": "agent", "text": reason})
+                self._announce_agent_step(tool, step.get("input", ""))
                 result = self._execute_tool_step(tool, step.get("input", ""))
                 self._context.update_after_action(tool, step.get("input", ""), {}, result)
                 executed_steps.append({"step": step, "result": result})
-                if not result.get("success", True):
-                    break
 
-            final_message = planner_msg or (executed_steps[-1]["result"].get("message", "") if executed_steps else "Done.")
+                status_line = result.get("message") or result.get("status") or ""
+                if status_line:
+                    self._events.emit("command_progress", {"stage": "agent_step", "text": status_line})
+
+                pending_steps.clear()
+
+                if not result.get("success", True):
+                    feedback = f"Step {tool} failed: {status_line or 'no message'}. Continue from current app/url."
+                    continue
+
+            final_message = planner_msg or (executed_steps[-1]["result"].get("message", "") if executed_steps else "Reached agent limit.")
+            if executed_steps and executed_steps[-1]["result"].get("success") is False:
+                final_message = f"{final_message} Need guidance for the next move."
+            if len(executed_steps) >= max_steps and not planner_msg:
+                final_message = f"{final_message} (stopped after {max_steps} steps)"
             result_payload = {"type": "agent_loop", "steps": executed_steps, "message": final_message}
             self._events.emit("command_result", result_payload)
             self._interactions.finish(final_message)
@@ -580,6 +611,14 @@ class JarvisApp:
         if tool == "open_url":
             return execute_action("open_dynamic", arg, {"resolved_type": "url"})
         return {"success": False, "status": "error", "message": f"Unknown tool {tool}"}
+
+    def _announce_agent_step(self, tool: str, arg: str) -> None:
+        desc = arg if arg else tool
+        try:
+            self._events.emit("overlay_state", {"state": "acting", "text": desc[:60]})
+        except Exception:
+            pass
+        self._interactions.narrate_action(tool, arg)
 
     # ─── Proactive Intelligence (Phase 19) ────────────────────
 
