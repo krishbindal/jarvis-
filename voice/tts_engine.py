@@ -114,7 +114,7 @@ class TTSEngine:
                     logger.error(f"TTS Synthesis failed: {e}")
                 finally:
                     # 4. Restore Music Volume if we ducked it
-                    if ducking_applied and pygame.mixer.get_init():
+                    if ducking_applied:
                         try:
                             pygame.mixer.music.set_volume(old_music_vol)
                         except Exception:
