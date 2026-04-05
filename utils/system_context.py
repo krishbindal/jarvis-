@@ -1,5 +1,9 @@
-import psutil
 from typing import Dict, Any, Optional
+
+try:
+    import psutil  # type: ignore
+except Exception:  # noqa: BLE001
+    psutil = None
 
 try:
     import win32gui
@@ -23,6 +27,13 @@ def get_active_window_title() -> str:
 def get_system_stats() -> Dict[str, Any]:
     """Return lightweight system resource metrics."""
     try:
+        if not psutil:
+            return {
+                "cpu_percent": 0,
+                "memory_percent": 0,
+                "battery_percent": None,
+                "active_window": get_active_window_title()
+            }
         return {
             "cpu_percent": psutil.cpu_percent(interval=None),
             "memory_percent": psutil.virtual_memory().percent,
@@ -40,6 +51,8 @@ def get_system_stats() -> Dict[str, Any]:
 def get_active_process_name() -> str:
     """Return the name of the active process (e.g., 'chrome.exe')."""
     try:
+        if not psutil or not _WIN32_AVAILABLE:
+            return "Unknown"
         if not _WIN32_AVAILABLE:
             return "Unknown"
         hwnd = win32gui.GetForegroundWindow()
