@@ -48,6 +48,9 @@ from voice.tts_engine import speak, init_tts
 from memory.database import MemoryDB
 from core.interaction_loop import InteractionLoop
 from core.mcp_hub import get_mcp_hub
+from core.context_state import ContextState
+from brain.agent_planner import plan_steps
+from executor import agent_tools
 
 logger = get_logger(__name__)
 
@@ -100,6 +103,7 @@ class JarvisApp:
         # Database for stats
         self._db = MemoryDB()
         self._interactions = InteractionLoop(self._events)
+        self._context = ContextState()
         self._events.subscribe("interrupt_tts", lambda *_: self._interactions.stop())
 
         # Phase 26: Start MCP Hub (Open Interpreter, Playwright, etc.)
@@ -229,6 +233,8 @@ class JarvisApp:
         try:
             raw_text = payload.get("text", "")
             text = raw_text.lower().strip() if raw_text else ""
+            self._context.set_intent(raw_text)
+            self._context.set_task(True)
 
             self._interactions.reset()
             if raw_text:
@@ -245,6 +251,13 @@ class JarvisApp:
             # ── [PARSED] ─────────────────────────────────────
             route_result = route_command(text)
             logger.info("[PARSED] result=%s", _summary(route_result))
+
+            # Agent loop for context-driven follow-ups or unknowns
+            if self._should_use_agent_loop(route_result):
+                result, interaction_steps = self._run_agent_loop(raw_text)
+                final_result = result
+                interaction_done = True
+                return
 
             # Multi-step: route_command may return a list
             if isinstance(route_result, list):
@@ -293,6 +306,7 @@ class JarvisApp:
                 exec_result = execute_action(action, target, extra)
                 result["exec_result"] = exec_result
                 result["message"] = exec_result.get("message", result.get("message", ""))
+                self._context.update_after_action(action, target, extra, exec_result)
 
                 # Phase 24: Log usage for habits
                 if action in ["open_app", "open_url", "trigger_n8n"]:
@@ -337,6 +351,7 @@ class JarvisApp:
                 save_interaction(payload.get("text", ""), interaction_steps, final_result or {})
             except Exception as exc:
                 logger.error("[ERROR] Memory persistence failed: %s", exc)
+            self._context.set_task(False)
 
             # Phase 27: Learn personality from this interaction
             try:
@@ -382,6 +397,7 @@ class JarvisApp:
                 exec_result = execute_action(action, target, extra, previous_result=previous)
                 step_result["exec_result"] = exec_result
                 step_result["message"] = exec_result.get("message", step_result.get("message", ""))
+                self._context.update_after_action(action, target, extra, exec_result)
 
                 # Phase 24: Log usage for habits (multi-step)
                 if action in ["open_app", "open_url", "trigger_n8n"]:
@@ -468,7 +484,9 @@ class JarvisApp:
         extra = step.get("extra", {})
         if not action:
             return {"success": False, "status": "error", "message": "Missing action"}
-        return execute_action(action, target, extra, previous_result=previous_result)
+        result = execute_action(action, target, extra, previous_result=previous_result)
+        self._context.update_after_action(action, target, extra, result)
+        return result
 
     def _validate_ai_steps(self, steps: list[dict]) -> dict:
         if not isinstance(steps, list):
@@ -496,6 +514,72 @@ class JarvisApp:
         if not deduped:
             return {"error": "No valid steps"}
         return {"steps": deduped}
+
+    # ─── Agent Loop (Context-Aware) ──────────────────────────
+
+    def _should_use_agent_loop(self, route_result) -> bool:
+        """Decide whether to invoke the planner-based agent loop."""
+        if isinstance(route_result, list):
+            return False
+        action = route_result.get("action") if isinstance(route_result, dict) else "unknown"
+        if action == "unknown":
+            return True
+        if self._context.has_active_context() and action in ("chat", "media_control", "noop"):
+            return True
+        return False
+
+    def _run_agent_loop(self, command: str) -> tuple[dict, list]:
+        """Plan → act → observe loop using the tool abstraction layer."""
+        try:
+            visual = ""
+            try:
+                from brain.vision_provider import get_visual_context
+                visual = get_visual_context()
+            except Exception:
+                visual = ""
+            ctx_snapshot = self._context.snapshot()
+            steps, planner_msg = plan_steps(command, ctx_snapshot, visual)
+            executed_steps = []
+
+            for step in steps:
+                tool = step.get("tool", "")
+                reason = step.get("reason", "")
+                self._events.emit("command_progress", {"stage": "agent", "text": reason or tool})
+                result = self._execute_tool_step(tool, step.get("input", ""))
+                self._context.update_after_action(tool, step.get("input", ""), {}, result)
+                executed_steps.append({"step": step, "result": result})
+                if not result.get("success", True):
+                    break
+
+            final_message = planner_msg or (executed_steps[-1]["result"].get("message", "") if executed_steps else "Done.")
+            result_payload = {"type": "agent_loop", "steps": executed_steps, "message": final_message}
+            self._events.emit("command_result", result_payload)
+            self._interactions.finish(final_message)
+            return result_payload, executed_steps
+        except Exception as exc:
+            logger.error("[AGENT] Agent loop failed: %s", exc, exc_info=True)
+            result_payload = {"type": "agent_loop", "message": f"Agent loop error: {exc}"}
+            self._events.emit("command_result", result_payload)
+            self._interactions.finish(result_payload["message"])
+            return result_payload, []
+
+    def _execute_tool_step(self, tool: str, arg: str) -> dict:
+        tool = tool or ""
+        if tool == "open_app":
+            return agent_tools.open_app(arg)
+        if tool == "type_text":
+            return agent_tools.type_text(arg)
+        if tool == "press_key":
+            return agent_tools.press_key(arg)
+        if tool == "click":
+            return agent_tools.click(arg)
+        if tool == "read_screen":
+            return agent_tools.read_screen()
+        if tool == "get_active_app":
+            return agent_tools.get_active_app()
+        if tool == "open_url":
+            return execute_action("open_dynamic", arg, {"resolved_type": "url"})
+        return {"success": False, "status": "error", "message": f"Unknown tool {tool}"}
 
     # ─── Proactive Intelligence (Phase 19) ────────────────────
 

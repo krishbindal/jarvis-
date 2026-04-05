@@ -42,6 +42,7 @@ python main.py
 - Speak -> Act -> Stream: Actions begin right away with mid-action voice lines (e.g., "Opening Chrome") and a continuous status feed to the overlay and console typewriter.
 - Interrupts: Say “stop” at any time to halt speech/streams via the event bus.
 - Cinematic console: System logs and streamed tokens render with a lightweight typewriter effect; the floating overlay mirrors command progress stages.
+- Context-aware agent loop: A shared session context (current app/url, last intent/action) feeds a planner that can continue follow-up commands on any app or site without hardcoded flows.
 
 If you want to bypass clap activation (e.g., during development), instantiate `JarvisApp(auto_start=True)` in `main.py`.
 
