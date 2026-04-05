@@ -210,8 +210,10 @@ class VoiceListener:
             threading.Thread(target=process_voice, daemon=True).start()
 
     def _run(self):
-        logger.info("Starting background hybrid voice listener.")
+        logger.info("[VOICE] Starting background hybrid voice listener.")
         try:
+            # Troubleshooting: log available devices if needed
+            # import sounddevice as sd; print(sd.query_devices())
             with sd.RawInputStream(
                 samplerate=16000,
                 blocksize=4000,
@@ -222,7 +224,13 @@ class VoiceListener:
                 while self._running:
                     sd.sleep(100)
         except Exception as exc:  # noqa: BLE001
-            logger.error("Voice listener crashed: %s", exc)
+            logger.error("[VOICE] Listener crashed or could not access microphone: %s", exc)
+            # Try to list devices for the user in the logs
+            try:
+                devices = sd.query_devices()
+                logger.info("[VOICE] Available audio devices:\n%s", devices)
+            except Exception:
+                pass
 
     def start(self):
         if self._running or self.model is None or self.rec is None:

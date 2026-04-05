@@ -6,7 +6,7 @@ from utils.startup import enable_autostart
 def main() -> None:
     # Ensure background start on future boots
     enable_autostart()
-    app = JarvisApp()
+    app = JarvisApp(auto_start=True)
     app.run()
 
 

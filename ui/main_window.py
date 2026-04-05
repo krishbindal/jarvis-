@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
-from PySide6.QtCore import Qt, QTimer, QPoint
+from PySide6.QtCore import Qt, QTimer, QPoint, Signal, Slot, QObject
 from PySide6.QtGui import QColor, QFont, QPalette, QPainter, QPen, QLinearGradient, QTextCursor
 from PySide6.QtWidgets import (
     QFrame,
@@ -21,11 +21,21 @@ from PySide6.QtWidgets import (
 
 from utils import EventBus
 from utils.system_context import get_system_stats
+from utils.logger import get_logger
 import math
+
+logger = get_logger(__name__)
 
 # UI Constants
 ACCENT = "#00ffff"
 NEON_GLOW = "rgba(0, 255, 255, 120)"
+
+class SignalBridge(QObject):
+    """Bridge for thread-safe EventBus communication."""
+    result_signal = Signal(dict)
+    stream_signal = Signal(dict)
+    cinematic_signal = Signal(dict)
+    progress_signal = Signal(dict)
 
 class JarvisWindow(QMainWindow):
     """Modern, Glassmorphism-themed window for JARVIS-X."""
@@ -40,14 +50,22 @@ class JarvisWindow(QMainWindow):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         self.setAttribute(Qt.WA_TranslucentBackground)
         
+        # Signals Bridge (more robust for experimental PySide6/Python environments)
+        self.signals = SignalBridge()
+        self.signals.result_signal.connect(self._on_command_result)
+        self.signals.stream_signal.connect(self._on_stream_output)
+        self.signals.cinematic_signal.connect(self._on_cinematic_log)
+        self.signals.progress_signal.connect(self._on_command_progress)
+
         self._setup_glass_effect()
         self._build_layout()
         self._load_styles()
-        
-        self._events.subscribe("command_result", self._on_command_result)
-        self._events.subscribe("stream_output", self._on_stream_output)
-        self._events.subscribe("cinematic_log", self._on_cinematic_log)
-        self._events.subscribe("command_progress", self._on_command_progress)
+
+        if self._events:
+            self._events.subscribe("command_result", self.signals.result_signal.emit)
+            self._events.subscribe("stream_output", self.signals.stream_signal.emit)
+            self._events.subscribe("cinematic_log", self.signals.cinematic_signal.emit)
+            self._events.subscribe("command_progress", self.signals.progress_signal.emit)
         self._drag_pos = QPoint()
         self._streaming = False
         self._typing_timer = QTimer(self)
@@ -61,9 +79,12 @@ class JarvisWindow(QMainWindow):
         try:
             from winmica import ApplyMica
             # Apply Mica/Acrylic to the HWND
-            ApplyMica(int(self.winId()), True) # Dark Mode Acrylic
-        except Exception:
-            pass
+            # We use try/except block to handle potential winId() or winmica issues
+            hwnd = int(self.winId())
+            ApplyMica(hwnd, dark_mode=True)
+            logger.info("[UI] Windows 11 Mica effect applied.")
+        except Exception as e:
+            logger.debug("[UI] Failed to apply Mica effect (likely non-Win11 or missing lib): %s", e)
 
     def _load_styles(self) -> None:
         qss_path = os.path.join(os.path.dirname(__file__), "styles.qss")
@@ -149,6 +170,7 @@ class JarvisWindow(QMainWindow):
         self._events.emit("command_received", {"text": text})
         self.status_label.setText("ANALYZING...")
 
+    @Slot(dict)
     def _on_command_result(self, payload: dict) -> None:
         message = payload.get("message") or "Logic complete."
         action = payload.get("action", "")
@@ -159,6 +181,7 @@ class JarvisWindow(QMainWindow):
     def _append_log(self, line: str) -> None:
         self.console.append(line)
 
+    @Slot(dict)
     def _on_stream_output(self, payload: dict) -> None:
         token = payload.get("token", "")
         reset = payload.get("reset", False)
@@ -170,12 +193,14 @@ class JarvisWindow(QMainWindow):
         cursor.insertText(token)
         self.console.setTextCursor(cursor)
 
+    @Slot(dict)
     def _on_cinematic_log(self, payload: dict) -> None:
         text = payload.get("text", "")
         if not text:
             return
         self._queue_type_line(text)
 
+    @Slot(dict)
     def _on_command_progress(self, payload: dict) -> None:
         text = payload.get("text", "")
         if text:

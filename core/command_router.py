@@ -242,6 +242,15 @@ def _route_single(normalized: str) -> Dict:
     if normalized in _GREETINGS or any(normalized.startswith(g) for g in _GREETINGS):
         return _build("chat", normalized, "Greeting")
 
+    # ── 1.5. Plugin/Skill System (Phase 26) — MOVE TO TOP ─────
+    skill_match = match_skill(normalized)
+    if skill_match:
+        return _build(
+            f"skill:{skill_match['skill_name']}",
+            normalized,
+            skill_match['description'],
+        )
+
     # ── 2. File-spec (JSON patterns) ──────────────────────────
     file_cmd = _match_file_command(normalized)
     if file_cmd:
@@ -356,15 +365,6 @@ def _route_single(normalized: str) -> Dict:
         q = search_match.group(1).strip()
         if q:
             return _build("quick_search", q, f"Searching web for: {q}")
-
-    # ── 13. Plugin/Skill System (Phase 26) ────────────────────
-    skill_match = match_skill(normalized)
-    if skill_match:
-        return _build(
-            f"skill:{skill_match['skill_name']}",
-            normalized,
-            skill_match['description'],
-        )
 
     # ── 14. Fallback → unknown (will be sent to AI) ──────────
     return _build("unknown", "", "Command not recognized.")

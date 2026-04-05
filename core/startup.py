@@ -9,7 +9,7 @@ from typing import Callable, Optional
 
 import pygame
 
-STARTUP_SOUND = Path(__file__).resolve().parent.parent / "assets" / "sounds" / "startup.mp3"
+STARTUP_SOUND = Path(__file__).resolve().parent.parent / "jarvis music.mp3"
 
 
 def _init_mixer() -> bool:
