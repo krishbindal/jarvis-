@@ -18,21 +18,15 @@ logger = get_logger(__name__)
 class KnowledgeIndexer:
     """Crawl and index local documents for RAG."""
 
-    def __init__(self, interval_min: int = 60):
+    def __init__(self, interval_min: int = 60, event_bus=None):
         self._interval = interval_min * 60
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._indexed_hashes: Set[str] = set()
+        self._events = event_bus
         
-        # Whitelist of folders to index
-        home = str(Path.home())
-        self._targets = [
-            os.path.join(home, "Documents"),
-            os.path.join(home, "Desktop"),
-            os.getcwd() # Current project folder
-        ]
-        # Supported extensions
-        self._extensions = {".txt", ".md", ".py", ".js", ".ts", ".html", ".css", ".json"}
+        if self._events:
+            self._events.subscribe("system_shutdown", self.stop)
 
     def start(self) -> None:
         if self._running:
@@ -59,6 +53,10 @@ class KnowledgeIndexer:
 
     def _index_file(self, path: str) -> None:
         """Read, chunk, embed, and store file content."""
+        # Skip large files (>1MB) to prevent RAM spikes
+        if os.path.exists(path) and os.path.getsize(path) > 1024 * 1024:
+            return
+
         file_hash = self._get_file_hash(path)
         if not file_hash or file_hash in self._indexed_hashes:
             return
@@ -105,8 +103,8 @@ class KnowledgeIndexer:
                             if ext in self._extensions:
                                 file_path = os.path.join(root, file)
                                 self._index_file(file_path)
-                                # Throttle to prevent high CPU / disk IO
-                                time.sleep(0.5) 
+                                # Throttle heavily to prevent high CPU / disk IO
+                                time.sleep(2.0) 
                                 if not self._running: break
                         if not self._running: break
                     if not self._running: break

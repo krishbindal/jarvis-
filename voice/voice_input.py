@@ -75,8 +75,13 @@ class VoiceListener:
         self.ambient_mode = True
         self._listening_for_command = False
         
+        self._is_jarvis_speaking = False
+        self._last_wake_time = 0.0  # Cooldown tracker (Phase 32)
+        
         if self._event_bus:
             self._event_bus.subscribe("jarvis_wake", self._on_jarvis_wake)
+            self._event_bus.subscribe("overlay_state", self._on_overlay_state)
+            self._event_bus.subscribe("system_shutdown", self.stop)
         
         # Load Vosk Model once
         self.model = None
@@ -86,17 +91,39 @@ class VoiceListener:
             logger.error("Vosk dependency missing; cannot initialize VoiceListener.")
             return
             
-        model_path = Path(config.VOICE_MODEL_PATH)
-        if not model_path.exists():
-            logger.error(f"Voice model not found at {model_path}")
-            return
-            
         try:
+            # Find model folder
+            voice_dir = os.path.dirname(os.path.abspath(__file__))
+            model_path = os.path.join(voice_dir, "model")
+            
+            if not os.path.exists(model_path):
+                # Fallback to absolute search or relative to root
+                base_dir = os.path.dirname(voice_dir)
+                model_alt = os.path.join(base_dir, "vosk-model-small-en-us-0.15")
+                if os.path.exists(model_alt):
+                    model_path = model_alt
+                else:
+                    logger.warning("[VOICE] Vosk model not found! Checked '%s' and '%s'", model_path, model_alt)
+                    self.model = None
+                    self.rec = None
+                    return
+            
             self.model = Model(str(model_path))
             self.rec = KaldiRecognizer(self.model, 16000)
             logger.info("[VOICE] Hybrid engine initialized (Vosk + preparation for Groq).")
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to load Vosk model: %s", exc)
+
+        # Load OpenWakeWord directly into VoiceListener to avoid sounddevice conflicts
+        self._oww_model = None
+        try:
+            import openwakeword
+            from openwakeword.model import Model as OWWModel
+            openwakeword.utils.download_models()
+            self._oww_model = OWWModel(wakeword_models=["hey_jarvis"], inference_framework="onnx")
+            logger.info("[VOICE] OpenWakeWord model loaded into VoiceListener.")
+        except Exception as exc:
+            logger.warning("[VOICE] OpenWakeWord failed to load: %s", exc)
 
     def _transcribe_online(self, audio_data: bytes) -> Optional[str]:
         """Send audio to Groq Whisper for high-accuracy transcription."""
@@ -143,22 +170,72 @@ class VoiceListener:
             logger.debug(f"[VOICE] Online transcription failed: {e}")
             return None
 
-    def _on_jarvis_wake(self, payload=None):
-        """Phase 20: Wakes up the listener to process the next incoming command."""
+    def _on_jarvis_wake(self, payload: dict):
+        """Handle wake-up event by preparing for command input."""
+        now = time.time()
+        
+        # 2-second Cooldown: prevent self-triggering loops if echo cancellation fails
+        if now - self._last_wake_time < 2.0:
+            logger.debug("[VOICE] Wake event ignored (cooldown active)")
+            return
+            
+        self._last_wake_time = now
+        logger.info("[VOICE] JARVIS WAKE signal received. Starting command listener...")
+        
         self._listening_for_command = True
-        logger.info("[VOICE] Woke up! Listening for next command...")
-        try:
-            self._event_bus.emit("overlay_state", {"state": "listening", "text": "Awaiting command"})
-        except Exception:
-            pass
+        
+        # Clear old audio buffer
+        with self._buffer_lock:
+            self._audio_buffer = io.BytesIO()
+            
+        # Acknowledge (skip if it was an internal relay to avoid loop)
+        if payload.get("source") != "app_internal":
+            from core.interactions import speak
+            speak("Yes, sir?")
+        
+    def _on_overlay_state(self, payload: dict):
+        """Track if JARVIS is speaking to avoid hearing himself."""
+        state = payload.get("state")
+        self._is_jarvis_speaking = (state == "speaking")
 
     def _callback(self, indata, frames, time_info, status):
         """Audio callback from sounddevice."""
         if status:
             logger.debug("Audio status: %s", status)
 
+        # Echo Cancellation: Ignore audio while JARVIS is speaking
+        if self._is_jarvis_speaking:
+            return
+
         if self.ambient_mode and not self._listening_for_command:
-            return  # Drop audio if we are in ambient mode and waiting for wake word
+            if self._oww_model:
+                import numpy as np
+                audio_array = np.frombuffer(bytes(indata), dtype=np.int16)
+                try:
+                    prediction = self._oww_model.predict(audio_array)
+                    for model_name, score in prediction.items():
+                        if score > 0.5:
+                            logger.info("[VOICE] OpenWakeWord detected '%s' (score=%.3f)", model_name, score)
+                            self._oww_model.reset()
+                            
+                            # Fire wake word sequence
+                            if self._event_bus:
+                                self._event_bus.emit("interrupt_tts")
+                                self._event_bus.emit("jarvis_wake")
+                                self._event_bus.emit("overlay_state", {"state": "listening", "text": "Hey Jarvis!"})
+                            
+                            # Play activation sound
+                            try:
+                                from utils.notifications import notify
+                                notify("🎤 Jarvis Activated", "Listening for your command...")
+                            except Exception:
+                                pass
+                            return
+                except Exception as e:
+                    logger.error("[Voice] OpenWakeWord predict error: %s", e)
+
+            # Drop audio if wake word hasn't triggered
+            return
 
         audio_bytes = bytes(indata)
         
@@ -188,6 +265,8 @@ class VoiceListener:
                 
                 # Reset ambient listener so we wait for Wake Word again
                 self._listening_for_command = False
+                if self._event_bus:
+                    self._event_bus.emit("command_complete")
                 
                 if final_text:
                     final_text = clean_text(final_text)
@@ -212,11 +291,8 @@ class VoiceListener:
     def _run(self):
         logger.info("[VOICE] Starting background hybrid voice listener.")
         try:
-            # Troubleshooting: log available devices if needed
-            # import sounddevice as sd; print(sd.query_devices())
             with sd.RawInputStream(
                 samplerate=16000,
-                blocksize=4000,
                 dtype='int16',
                 channels=1,
                 callback=self._callback

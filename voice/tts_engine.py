@@ -61,31 +61,27 @@ class TTSEngine:
         await communicate.save(output_file)
 
     def speak(self, text: str) -> None:
-        """Thread-safe call to speak text with overlay state signaling."""
+        """Thread-safe call to speak text with overlay state signaling and audio ducking."""
         if not text:
             return
 
+        self._is_speaking = True
+        # Signal overlay: speaking IMMEDIATELY (to help VoiceListener with echo cancellation)
+        if self._events:
+            self._events.emit("overlay_state", {
+                "state": "speaking",
+                "text": text[:40]
+            })
+
         def _speak_thread():
             with self._lock:
-                self._is_speaking = True
-
-                # Signal overlay: speaking
-                if self._events:
-                    self._events.emit("overlay_state", {
-                        "state": "speaking",
-                        "text": text[:40]
-                    })
+                if not text.strip():
+                    return
 
                 try:
-                    # Defensive: Ensure mixer is still alive before synthesis
+                    # Defensive: Ensure mixer is still alive
                     if not pygame.mixer.get_init():
-                        logger.warning("[TTS] Mixer was closed unexpectedly. Re-initializing...")
-                        try:
-                            pygame.mixer.pre_init(44100, -16, 2, 2048)
-                            pygame.mixer.init()
-                        except Exception as mix_err:
-                            logger.error(f"[TTS] Failed to re-initialize mixer: {mix_err}")
-                            return
+                        pygame.mixer.init()
 
                     # 1. Generate Audio
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
@@ -93,26 +89,47 @@ class TTSEngine:
 
                     asyncio.run(self._synthesize(text, tmp_path))
 
-                    # 2. Play Audio
-                    pygame.mixer.music.load(tmp_path)
-                    pygame.mixer.music.play()
-                    self._interrupted = False
+                    # 2. Audio Ducking — Lower music volume if active
+                    ducking_applied = False
+                    old_music_vol = 1.0
+                    if pygame.mixer.music.get_busy():
+                        old_music_vol = pygame.mixer.music.get_volume()
+                        pygame.mixer.music.set_volume(old_music_vol * 0.2) # Drop to 20%
+                        ducking_applied = True
 
-                    while pygame.mixer.music.get_busy():
+                    # 3. Play as Sound on a dedicated channel
+                    sound = pygame.mixer.Sound(tmp_path)
+                    channel = pygame.mixer.Channel(0)
+                    channel.play(sound)
+                    
+                    self._interrupted = False
+                    # Wait for sound to finish
+                    while channel.get_busy():
                         if self._interrupted:
-                            pygame.mixer.music.stop()
+                            channel.stop()
                             break
                         pygame.time.Clock().tick(10)
-
-                    # 3. Cleanup
-                    pygame.mixer.music.unload()
-                    if os.path.exists(tmp_path):
-                        os.remove(tmp_path)
 
                 except Exception as e:
                     logger.error(f"TTS Synthesis failed: {e}")
                 finally:
+                    # 4. Restore Music Volume if we ducked it
+                    if ducking_applied and pygame.mixer.get_init():
+                        try:
+                            pygame.mixer.music.set_volume(old_music_vol)
+                        except Exception:
+                            pass
+                            
                     self._is_speaking = False
+                    if self._events:
+                        self._events.emit("overlay_state", {"state": "IDLE"})
+                    # 5. Cleanup temp file
+                    if os.path.exists(tmp_path):
+                        try:
+                            os.remove(tmp_path)
+                        except Exception:
+                            pass
+
                     # Signal overlay: back to idle
                     if self._events:
                         self._events.emit("overlay_state", {"state": "idle"})

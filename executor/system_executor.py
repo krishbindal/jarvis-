@@ -369,20 +369,28 @@ def power_state(action: str) -> Dict:
         return {"success": False, "status": "error", "message": str(exc)}
 
 import time
-from PIL import ImageGrab
+import mss
+from PIL import Image
 
 def capture_screen(target: str = "") -> Dict:
+    """Capture all monitors using mss (more stable than ImageGrab in threads)."""
     try:
-        import os
         from pathlib import Path
         assets_dir = Path("assets/memory")
         assets_dir.mkdir(parents=True, exist_ok=True)
         filename = f"jarvis_vision_{int(time.time())}.png"
         filepath = assets_dir / filename
-        screenshot = ImageGrab.grab()
-        screenshot.save(filepath)
+        
+        with mss.mss() as sct:
+            # Capture the combined virtual screen (all monitors)
+            screenshot = sct.grab(sct.monitors[0])
+            img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+            img.save(filepath)
+            
+        logger.info("[SYSTEM] Screen captured to %s", filepath)
         return {"success": True, "status": "success", "message": f"Screen captured to {filepath}", "output": str(filepath)}
     except Exception as exc:
+        logger.error("[SYSTEM] Screen capture failed: %s", exc)
         return {"success": False, "status": "error", "message": f"Screen capture failed: {str(exc)}"}
 
 def run_system_check(target: str = "") -> Dict:

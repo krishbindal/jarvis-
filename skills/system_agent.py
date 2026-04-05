@@ -67,7 +67,7 @@ def _generate_code(intent: str) -> str:
             from google import genai
             client = genai.Client(api_key=GEMINI_API_KEY)
             response = client.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-2.0-flash',
                 contents=f"{SYSTEM_PROMPT}\n\nUser intent: {intent}"
             )
             return _clean_markdown(response.text)

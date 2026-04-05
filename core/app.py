@@ -61,6 +61,9 @@ class JarvisApp:
     def __init__(self, auto_start: bool = False) -> None:
         self.auto_start = auto_start
         self._running = True
+        self._ui_app = None
+        self._ui_window = None
+        self._ui_overlay = None
         self._activation_event = threading.Event()
         self._events = EventBus()
         self._events.subscribe("jarvis_wake", self._handle_activation)
@@ -74,7 +77,7 @@ class JarvisApp:
         self.stop_on_error: bool = True
 
         # Phase 16: Vision Provider
-        self._vision = get_vision_provider()
+        self._vision = get_vision_provider(event_bus=self._events)
 
         # Phase 18: Initialize TTS with event bus for overlay integration
         init_tts(event_bus=self._events)
@@ -83,8 +86,8 @@ class JarvisApp:
         self._proactive_thread: Optional[threading.Thread] = None
         self._proactive_running = False
 
-        # Phase 20: Wake Word Detector
-        self._wake_word = WakeWordDetector(event_bus=self._events)
+        # Phase 20: Wake Word Detection is now handled in VoiceListener
+        self._wake_word = None
 
         # Phase 22: Clipboard Monitor
         self._clipboard = ClipboardMonitor(event_bus=self._events)
@@ -93,7 +96,7 @@ class JarvisApp:
         self._sorcerer = FileSorcerer(event_bus=self._events)
         
         # Phase 26: Knowledge Indexer (Omniscient)
-        self._indexer = KnowledgeIndexer()
+        self._indexer = KnowledgeIndexer(event_bus=self._events)
 
         # Phase 26: Deep Research Agent
         self._researcher = DeepResearchAgent(event_bus=self._events)
@@ -116,13 +119,19 @@ class JarvisApp:
 
     # ─── Activation ───────────────────────────────────────────
 
-    def _handle_activation(self) -> None:
-        if self._activation_event.is_set():
+    def _handle_activation(self, payload=None) -> None:
+        if payload and payload.get("source") == "system_activation":
             return
-        logger.info("Wake signal detected. Preparing cinematic startup...")
-        self._activation_event.set()
-        self._clap_detector.stop()
-        self._wake_word.stop()
+
+        if not self._activation_event.is_set():
+            logger.info("Wake signal detected. Preparing cinematic startup...")
+            self._activation_event.set()
+            self._clap_detector.stop()
+            if self._wake_word:
+                self._wake_word.stop()
+        
+        # Always emit the signal to ensure late-starting listeners (VoiceListener) catch it
+        self._events.emit("jarvis_wake", {"source": "system_activation"})
 
     def _start_clap_listener(self) -> None:
         def _runner() -> None:
@@ -138,11 +147,11 @@ class JarvisApp:
         """Start the assistant and wait for activation."""
         try:
             if self.auto_start:
-                self._activation_event.set()
+                self._handle_activation()
             else:
                 logger.info("Listening for 'Hey Jarvis' or double clap...")
-                self._start_clap_listener()
-                self._wake_word.start()  # Phase 20
+                # Wake word is now handled internally by VoiceListener
+                # self._start_clap_listener() # temporarily disabled to avoid conflicts
 
             # Wait for activation
             self._activation_event.wait()
@@ -208,14 +217,27 @@ class JarvisApp:
         except Exception:
             pass
 
+        # Phase 20: If auto-started, trigger the first wake manually BEFORE the blocking UI loop
+        if self.auto_start:
+            self._handle_activation()
+
         try:
-            launch_ui(self._events)
+            from PySide6.QtWidgets import QApplication
+            self._ui_app = QApplication.instance() or QApplication([])
+            self._ui_window, self._ui_overlay = launch_ui(self._events)
+            
+            # Start background services that need to be ready before UI event loop
+            if audio_thread and audio_thread.is_alive():
+                audio_thread.join(timeout=0)
+            
+            end_ts = time.monotonic()
+            logger.info("Cinematic startup completed in %.2fs. Entering UI loop...", end_ts - start_ts)
+            
+            # This blocks until UI is closed
+            self._ui_app.exec()
+            
         except Exception as exc:
             logger.error("UI launch failed: %s", exc)
-        if audio_thread and audio_thread.is_alive():
-            audio_thread.join(timeout=0)
-        end_ts = time.monotonic()
-        logger.info("Cinematic startup completed in %.2fs", end_ts - start_ts)
 
     def _predict_needs(self):
         """Predict user needs on startup based on top habits (Phase 24)."""
@@ -231,10 +253,17 @@ class JarvisApp:
     def _handle_command(self, payload: dict) -> None:
         """
         Master command handler with structured logging (Phase 8).
-
-        Pipeline:
-            [INPUT] → [PARSED] → [ACTION] → [EXECUTION] → memory save
+        Now runs in a background thread to prevent EventBus/UI blocking.
         """
+        threading.Thread(
+            target=self._process_command_threaded,
+            args=(payload,),
+            name="command-processor",
+            daemon=True
+        ).start()
+
+    def _process_command_threaded(self, payload: dict) -> None:
+        """Internal worker for actual command execution."""
         interaction_steps = []
         final_result = None
         interaction_done = False
@@ -284,6 +313,17 @@ class JarvisApp:
 
             # ── [PARSED] single-step ─────────────────────────
             logger.info("[PARSED] action=%s target='%s'", action, result.get("target", ""))
+
+            # ── 1. Stop / Interruption (Phase 32) ────────────
+            if action == "stop":
+                logger.info("[ACTION] STOP! Resetting system state.")
+                self._events.emit("interrupt_tts", {"source": "app_internal"})
+                self._events.emit("overlay_state", {"state": "idle", "text": "Task Aborted."})
+                self._context.set_task(False)
+                self._context.clear()
+                self._interactions.finish("Sir, I have stopped all current processing.")
+                interaction_done = True
+                return
 
             # ── AI Fallback (Phase 12) ───────────────────────
             if action == "unknown":
@@ -520,6 +560,8 @@ class JarvisApp:
             if not action.startswith("skill:") and action not in ACTION_REGISTRY and action != "open_dynamic":
                 return {"error": f"Unsupported action: {action}"}
             key = (action, target, json.dumps(extra, sort_keys=True, default=str))
+            
+            # Audio & Voice setup
             if key in seen:
                 continue
             seen.add(key)
@@ -537,9 +579,9 @@ class JarvisApp:
         action = route_result.get("action") if isinstance(route_result, dict) else "unknown"
         if action == "unknown":
             return True
-        if self._context.has_active_context() and action in ("chat", "media_control", "noop", "quick_search"):
+        if self._context.has_active_context() and action in ("media_control", "noop", "quick_search"):
             return True
-        if self._context.task_in_progress and action not in ("open_app", "open_dynamic", "open_url", "open_folder", "power_state", "system_check"):
+        if self._context.task_in_progress and action not in ("open_app", "open_dynamic", "open_url", "open_folder", "power_state", "system_check", "chat"):
             return True
         return False
 
@@ -708,8 +750,8 @@ class JarvisApp:
 
         # Stop Iron Man System Monitor
         try:
-            if hasattr(self, '_sys_monitor'):
-                self._sys_monitor.stop()
+            # self._clap_detector.stop()  # Disabled to save CPU for Alexa-like responsiveness
+            pass
         except Exception as exc:
             logger.error("Error stopping system monitor: %s", exc)
 
