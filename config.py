@@ -1,7 +1,11 @@
 """Configuration defaults for JARVIS-X - Dexter Copilot."""
 
 import os
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv  # type: ignore
+except Exception:  # noqa: BLE001
+    def load_dotenv(*_args, **_kwargs):
+        return False
 
 # Load environment variables from .env file
 load_dotenv()
