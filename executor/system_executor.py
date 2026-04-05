@@ -6,12 +6,18 @@ import os
 import shutil
 import subprocess
 import difflib
-import pyautogui
 from pathlib import Path
 from typing import Dict, List
 
 from config import SAFE_DIRECTORIES
 from utils.logger import get_logger
+
+try:
+    import pyautogui
+    _PYAUTOGUI_ERROR = None
+except Exception as exc:  # noqa: BLE001
+    pyautogui = None
+    _PYAUTOGUI_ERROR = exc
 
 logger = get_logger(__name__)
 
@@ -260,6 +266,8 @@ def open_app(target: str) -> Dict:
     # Phase 16: Native Start Menu trigger
     if target_lower == "start" or target_lower == "start menu":
         logger.info("[SYSTEM] Triggering native Start Menu (Win key)")
+        if not pyautogui:
+            return {"success": False, "status": "error", "message": f"pyautogui unavailable: {_PYAUTOGUI_ERROR}"}
         pyautogui.press('win')
         return {"success": True, "status": "success", "message": "Opening Start Menu", "output": "WIN_KEY"}
 

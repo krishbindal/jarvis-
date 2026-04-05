@@ -40,11 +40,12 @@ class ContextState:
             if exec_result:
                 self._state["last_result_message"] = exec_result.get("message")
                 self._state["last_result_status"] = exec_result.get("status")
-            if action in ("open_app", "open_dynamic", "open_url"):
+            resolved_url = (extra or {}).get("resolved_url") or target
+            if action in ("open_app", "open_dynamic", "open_url", "search"):
                 app = (extra or {}).get("app") or target
                 self._state["current_app"] = app
-            if action in ("open_dynamic", "open_url") and target:
-                self._state["current_url"] = target
+            if action in ("open_dynamic", "open_url", "search") and resolved_url:
+                self._state["current_url"] = resolved_url
             if action == "kill_process":
                 killed = target.lower()
                 if self._state.get("current_app") and killed in (self._state["current_app"] or "").lower():
