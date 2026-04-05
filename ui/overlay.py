@@ -71,6 +71,7 @@ class JarvisOverlay(QWidget):
             self._events.subscribe("overlay_state", self._on_state_change)
             self._events.subscribe("command_result", self._on_command_result)
             self._events.subscribe("proactive_notification", self._on_proactive_notification)
+            self._events.subscribe("command_progress", self._on_command_progress)
 
     def _position_at_top(self) -> None:
         screen = QApplication.primaryScreen()
@@ -107,6 +108,11 @@ class JarvisOverlay(QWidget):
             QTimer.singleShot(3000, lambda: self.set_state(OverlayState.IDLE))
         else:
             self.set_state(OverlayState.IDLE)
+
+    def _on_command_progress(self, payload: dict) -> None:
+        text = payload.get("text", "")
+        if text:
+            self.set_state(self._state, text[:40])
 
     def _tick(self) -> None:
         self._phase += 0.08 # Increased speed to match lower FPS

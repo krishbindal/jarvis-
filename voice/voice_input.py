@@ -147,6 +147,10 @@ class VoiceListener:
         """Phase 20: Wakes up the listener to process the next incoming command."""
         self._listening_for_command = True
         logger.info("[VOICE] Woke up! Listening for next command...")
+        try:
+            self._event_bus.emit("overlay_state", {"state": "listening", "text": "Awaiting command"})
+        except Exception:
+            pass
 
     def _callback(self, indata, frames, time_info, status):
         """Audio callback from sounddevice."""
@@ -187,6 +191,11 @@ class VoiceListener:
                 
                 if final_text:
                     final_text = clean_text(final_text)
+                    if final_text.strip().lower() in ("stop", "cancel", "abort", "quiet"):
+                        logger.info("[VOICE] Stop word detected, interrupting speech/streams.")
+                        self._event_bus.emit("interrupt_tts")
+                        self._event_bus.emit("command_progress", {"stage": "interrupt", "text": "User requested stop"})
+                        return
                     # Broad criteria to avoid noise triggering commands
                     if any(word in final_text.lower() for word in COMMAND_KEYWORDS) or len(final_text.split()) > 2:
                         logger.info("✅ Voice Command: %s", final_text)

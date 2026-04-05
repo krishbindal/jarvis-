@@ -37,6 +37,12 @@ python main.py
 - The UI now uses a dark Jarvis HUD with neon accents, a circular animation, command log panel, and status banner.
 - Commands typed into the UI emit `command_received` events; the core routes them and emits `command_result` back to the log.
 
+## Real-Time Experience
+- Immediate acknowledgements: Jarvis answers with a short verbal cue as soon as a command arrives (voice or text) and starts streaming a "thinking" narration token-by-token from your local Ollama model (fallback to Groq).
+- Speak -> Act -> Stream: Actions begin right away with mid-action voice lines (e.g., "Opening Chrome") and a continuous status feed to the overlay and console typewriter.
+- Interrupts: Say “stop” at any time to halt speech/streams via the event bus.
+- Cinematic console: System logs and streamed tokens render with a lightweight typewriter effect; the floating overlay mirrors command progress stages.
+
 If you want to bypass clap activation (e.g., during development), instantiate `JarvisApp(auto_start=True)` in `main.py`.
 
 ## Customizing the Startup Sound
