@@ -9,6 +9,13 @@ Local, offline-first desktop assistant scaffolded for Windows using Python, PySi
 - Continuous context tracking keeps follow-up commands in the same surface (e.g., “open chrome” → “search python tutorial” stays in Chrome).
 - Step-level feedback logs every action and stops on failures with a concise status message.
 
+## Autonomous Intelligence
+- Background Autonomy Engine observes active apps/time with low-CPU sampling to learn habits without spamming the user.
+- Pattern detection persists common routines (e.g., Chrome → YouTube → Spotify) to SQLite with embeddings, then suggests them in a confident/minimal Jarvis tone.
+- Context-aware suggestions avoid reopening active apps and pause while a task is running; user can interrupt via the event bus (`interrupt_autonomy`).
+- Scheduler supports one-off or recurring commands with safe auto-execution and self-healing fallbacks (retries via `open_dynamic` when a launch fails).
+- All observations, patterns, and schedules are stored in `memory/jarvis.db` for long-term learning.
+
 ## Folder Structure
 - `core/` – application orchestration and startup sequence
 - `triggers/` – activation inputs (double-clap detector)

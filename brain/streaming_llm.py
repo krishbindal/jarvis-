@@ -7,7 +7,10 @@ import logging
 from typing import Generator, Iterable, List, Optional
 
 import requests
-from groq import Groq
+try:
+    from groq import Groq  # type: ignore
+except Exception:  # noqa: BLE001
+    Groq = None
 
 from config import MODEL_NAME, GROQ_API_KEY
 from utils.logger import get_logger
@@ -46,7 +49,7 @@ def _stream_ollama(messages: List[dict]) -> Generator[str, None, None]:
 
 def _stream_groq(messages: List[dict]) -> Generator[str, None, None]:
     """Yield tokens from Groq streaming as a fallback."""
-    if not GROQ_API_KEY:
+    if not GROQ_API_KEY or Groq is None:
         return
     try:
         client = Groq(api_key=GROQ_API_KEY, timeout=10.0)
