@@ -10,19 +10,41 @@ import requests
 from groq import Groq
 
 from config import MODEL_NAME, GROQ_API_KEY
+from brain.structured_output import (
+    MAX_STEPS,
+    clean_message,
+    normalize_tool_steps,
+    parse_structured_response,
+)
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
-SYSTEM_PROMPT = """
+ALLOWED_TOOLS = {
+    "open_app",
+    "type_text",
+    "press_key",
+    "click",
+    "read_screen",
+    "get_active_app",
+    "open_url",
+}
+
+STRICT_FORMAT = """
+Return ONLY JSON in one line (no Markdown, no prose):
+{"action":"plan","say":"short, human-like status","steps":[{"tool":"open_app","input":"...", "reason":""}]}
+Rules:
+- steps: max 3, each tool in [open_app, type_text, press_key, click, read_screen, get_active_app, open_url]
+- keep input concise; omit if not needed.
+- 'say' must be a single friendly sentence (<=140 chars) fit for speech/UI.
+- no extra keys, no explanations before/after the JSON.
+"""
+
+SYSTEM_PROMPT = f"""
 You are Jarvis, an autonomous agent. Plan the NEXT action(s) only — no hardcoded app/site flows.
-Strict reply format:
-ACTION: <tool>("input") # optional short reason
-...multiple ACTION lines allowed (max 3)...
-FINAL: <concise status/message>
-OR reply as JSON: {"steps":[{"tool":"...", "input":"...", "reason":"..."}], "message":"..."}.
+{STRICT_FORMAT}
 Available tools:
 - open_app(name): focus or launch an app.
 - type_text(text): type text at the focused field.
@@ -67,28 +89,32 @@ def _extract_json(text: str) -> Dict[str, Any]:
         return {}
 
 
-_ACTION_RE = re.compile(
-    r"^\s*action\s*:\s*(?P<tool>[a-zA-Z_]+)(?:\s*\(\s*(?P<input>[^)]*)\s*\))?",
-    re.IGNORECASE,
-)
+_ACTION_RE = re.compile(r"^\s*action\s*:\s*(?P<tool>[a-zA-Z_]+)(?:\s*\(\s*(?P<input>[^)]*)\s*\))?", re.IGNORECASE)
 
 
 def _extract_actions(text: str) -> Tuple[List[Dict[str, Any]], str]:
     steps: List[Dict[str, Any]] = []
     message = ""
+    seen = set()
     for line in text.splitlines():
         cleaned_line = line.strip()
         m = _ACTION_RE.search(cleaned_line)
         if not m:
             continue
         tool = (m.group("tool") or "").strip()
+        if tool and tool not in ALLOWED_TOOLS:
+            continue
         raw_input = (m.group("input") or "").strip()
         cleaned_input = raw_input.strip(' "\'')
         reason = ""
         if "#" in cleaned_line:
             reason = cleaned_line.split("#", 1)[1].strip()
-        if tool:
+        key = (tool, cleaned_input, reason)
+        if tool and key not in seen:
+            seen.add(key)
             steps.append({"tool": tool, "input": cleaned_input, "reason": reason})
+        if len(steps) >= MAX_STEPS:
+            break
     for line in reversed(text.splitlines()):
         if line.lower().startswith(("final:", "message:", "status:")):
             message = line.split(":", 1)[1].strip()
@@ -97,6 +123,9 @@ def _extract_actions(text: str) -> Tuple[List[Dict[str, Any]], str]:
 
 
 def plan_steps(command: str, context: Dict[str, Any], screen_context: str = "", feedback: str = "") -> Tuple[List[Dict[str, Any]], str]:
+    if not command:
+        return [], "No command provided."
+
     prompt = f"""User command: {command}
 Context (persistent across turns): {json.dumps(context)}
 Recent result/feedback: {feedback or "None"}
@@ -107,7 +136,7 @@ Rules:
 - Reuse current_app/current_url when present instead of re-opening surfaces.
 - When uncertain, call get_active_app or read_screen before acting.
 - No site/app-specific logic; rely only on the tools and context.
-- Respond ONLY with the strict format: ACTION: <tool>(\"input\") #reason and a FINAL line, or the JSON equivalent."""
+- Respond ONLY with the strict JSON format shown above."""
 
     raw = ""
     try:
@@ -121,22 +150,12 @@ Rules:
             logger.error("[AGENT] Planner failed: %s", exc)
             return [], "Planner unavailable."
 
-    parsed = _extract_json(raw)
-    steps = parsed.get("steps") or []
-    message = parsed.get("message") or ""
+    steps, message = parse_structured_response(raw, ALLOWED_TOOLS, default_message="Ready.", max_steps=MAX_STEPS)
 
     if not steps:
-        steps, extracted_msg = _extract_actions(raw)
+        action_lines, extracted_msg = _extract_actions(raw)
+        steps = normalize_tool_steps(action_lines, ALLOWED_TOOLS, max_steps=MAX_STEPS)
         message = message or extracted_msg
 
-    cleaned = []
-    for step in steps:
-        tool = step.get("tool")
-        if not tool:
-            continue
-        cleaned.append({
-            "tool": tool,
-            "input": step.get("input", ""),
-            "reason": step.get("reason", ""),
-        })
-    return cleaned, message
+    message = clean_message(message, default="Ready.")
+    return steps, message
