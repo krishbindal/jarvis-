@@ -14,13 +14,13 @@ logger = get_logger(__name__)
 
 
 ACKS = [
-    "Of course, sir.",
-    "On it immediately.",
-    "Processing for you.",
-    "Right away.",
-    "Certainly.",
-    "I'm on it.",
-    "Understood, sir.",
+    "Sure thing.",
+    "On it now.",
+    "Got it.",
+    "I'll take care of it.",
+    "Working on that.",
+    "You got it.",
+    "Absolutely.",
 ]
 
 ACTION_VERBS = {
