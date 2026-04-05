@@ -64,7 +64,7 @@ def _generate_code(intent: str) -> str:
     # 2. Try Gemini
     if GEMINI_API_KEY:
         try:
-            from google import genai
+            import google.generativeai as genai
             client = genai.Client(api_key=GEMINI_API_KEY)
             response = client.models.generate_content(
                 model='gemini-2.0-flash',
