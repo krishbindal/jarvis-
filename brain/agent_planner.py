@@ -30,13 +30,14 @@ ALLOWED_TOOLS = {
     "read_screen",
     "get_active_app",
     "open_url",
+    "scroll",
 }
 
 STRICT_FORMAT = """
 Return ONLY JSON in one line (no Markdown, no prose):
 {"action":"plan","say":"short, human-like status","steps":[{"tool":"open_app","input":"...", "reason":""}]}
 Rules:
-- steps: max 3, each tool in [open_app, type_text, press_key, click, read_screen, get_active_app, open_url]
+- steps: max 3, each tool in [open_app, type_text, press_key, click, read_screen, get_active_app, open_url, scroll]
 - keep input concise; omit if not needed.
 - 'say' must be a single friendly sentence (<=140 chars) fit for speech/UI.
 - no extra keys, no explanations before/after the JSON.
@@ -53,6 +54,7 @@ Available tools:
 - read_screen(): capture screen and return path + active app hints.
 - get_active_app(): returns active window/process.
 - open_url(url): open or reuse a browser with a URL.
+- scroll(amount): scroll vertically by pixels (negative = down).
 Guidelines:
 - Use current_app/current_url to continue in the same surface; avoid app/site-specific if/else.
 - Keep to the next 1-3 minimal steps; prefer single-step increments when uncertain.
