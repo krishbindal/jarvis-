@@ -259,6 +259,12 @@ def execute_action(
         hub = get_mcp_hub()
         return _safe_exec(hub.call_tool, action, extra)
 
+    # ── 1.5 Skill Handlers (Phase 16) ───────────────────────
+    if action.startswith("skill:"):
+        skill_name = action.replace("skill:", "")
+        logger.info(f"[EXEC] Routing to skill: {skill_name}")
+        return _safe_exec(execute_skill, skill_name, target, extra)
+
     # ── 2. Special Handlers ──────────────────────────────────
     if action == "open_dynamic":
         return _safe_exec(_open_dynamic_handler, target, extra)

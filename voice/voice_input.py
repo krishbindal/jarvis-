@@ -79,11 +79,14 @@ class VoiceListener:
         self._buffer_lock = threading.Lock()
         
         # Ambient Wake Word Integration (Phase 20)
-        self.ambient_mode = True
-        self._listening_for_command = False
+        self.ambient_mode = False # Always listen (Phase 32)
+        self._listening_for_command = True
         
         self._is_jarvis_speaking = False
         self._last_wake_time = 0.0  # Cooldown tracker (Phase 32)
+        self._last_audio_ts = time.time()
+        self._silence_start_ts = time.time()
+        self._max_listen_time = 7.0 # Total listening window before force-flush
         
         if self._event_bus:
             self._event_bus.subscribe("jarvis_wake", self._on_jarvis_wake)
@@ -246,12 +249,19 @@ class VoiceListener:
             return
 
         audio_bytes = bytes(indata)
+        self._last_audio_ts = time.time()
         
         # Add to buffer for online use
         with self._buffer_lock:
             self._audio_buffer.write(audio_bytes)
 
-        if self.rec and self.rec.AcceptWaveform(audio_bytes):
+        # Force flush if listening for too long (Phase 32)
+        force_flush = False
+        if time.time() - self._silence_start_ts > self._max_listen_time:
+            logger.debug("[VOICE] Maximum phrase duration reached. Forcing transcription.")
+            force_flush = True
+
+        if self.rec and (self.rec.AcceptWaveform(audio_bytes) or force_flush):
             # End of utterance detected by Vosk
             result = json.loads(self.rec.Result())
             offline_text = result.get("text", "").strip()
@@ -264,15 +274,24 @@ class VoiceListener:
             def process_voice():
                 final_text = offline_text
                 
-                # If online and text looks meaningful, try to polish with Groq
-                if is_online() and config.GROQ_API_KEY and len(full_audio) > 16000: # at least 0.5s
+                # Noise Gate: Only polish if we have some offline text or substantial audio
+                if is_online() and config.GROQ_API_KEY:
+                    # Skip polishing if Vosk heard nothing and we are just idling in ambient mode
+                    if not offline_text and len(full_audio) < 32000: # Less than 1 second of audio
+                         return
+
                     online_text = self._transcribe_online(full_audio)
-                    if online_text:
+                    if online_text and len(online_text.strip()) > 2:
                         logger.info(f"[VOICE] Groq polished: '{online_text}' (Vosk said: '{offline_text}')")
                         final_text = online_text
                 
-                # Reset ambient listener so we wait for Wake Word again
-                self._listening_for_command = False
+                # Keep listening permanently in "Always Listening" mode
+                if self.ambient_mode:
+                    self._listening_for_command = False
+                
+                # Reset phrase time tracker
+                self._silence_start_ts = time.time()
+                
                 if self._event_bus:
                     self._event_bus.emit("command_complete")
                 
@@ -303,6 +322,7 @@ class VoiceListener:
                 samplerate=16000,
                 dtype='int16',
                 channels=1,
+                blocksize=1280, # Match OpenWakeWord's preference
                 callback=self._callback
             ):
                 while self._running:
