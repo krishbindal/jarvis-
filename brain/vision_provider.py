@@ -25,7 +25,7 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 # How often to scan (seconds)
-DEFAULT_SCAN_INTERVAL = 30
+DEFAULT_SCAN_INTERVAL = 60
 VISION_MODEL = "gemini-2.0-flash"
 
 VISION_PROMPT = """You are observing a user's desktop screen. In 2-3 sentences, describe:
@@ -39,7 +39,7 @@ Be concise and factual. Do NOT invent information you can't see."""
 class VisionProvider:
     """Background screen observer using Gemini Vision (Free Tier)."""
 
-    def __init__(self, interval: int = DEFAULT_SCAN_INTERVAL) -> None:
+    def __init__(self, interval: int = DEFAULT_SCAN_INTERVAL, event_bus=None) -> None:
         self._interval = interval
         self._running = False
         self._thread: Optional[threading.Thread] = None
@@ -47,6 +47,10 @@ class VisionProvider:
         self._last_summary: str = "No visual context yet."
         self._last_capture_time: float = 0.0
         self._consecutive_errors = 0
+        self._events = event_bus
+        
+        if self._events:
+            self._events.subscribe("system_shutdown", self.stop)
 
     @property
     def last_summary(self) -> str:
@@ -168,11 +172,11 @@ class VisionProvider:
 _provider: Optional[VisionProvider] = None
 
 
-def get_vision_provider() -> VisionProvider:
+def get_vision_provider(event_bus=None) -> VisionProvider:
     """Return the global VisionProvider singleton."""
     global _provider
     if _provider is None:
-        _provider = VisionProvider()
+        _provider = VisionProvider(event_bus=event_bus)
     return _provider
 
 

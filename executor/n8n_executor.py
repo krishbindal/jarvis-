@@ -19,12 +19,21 @@ def trigger_workflow(action: str, data: Dict[str, Any] | None = None) -> Dict[st
         resp.raise_for_status()
         try:
             body = resp.json()
+            # n8n arrays or objects handling for the response field
+            if isinstance(body, list) and len(body) > 0 and isinstance(body[0], dict) and "response" in body[0]:
+                out_msg = str(body[0]["response"])
+            elif isinstance(body, dict) and "response" in body:
+                out_msg = str(body["response"])
+            else:
+                out_msg = f"Triggered n8n workflow '{action}'"
         except Exception:  # noqa: BLE001
             body = resp.text
+            out_msg = f"Triggered n8n workflow '{action}'"
+            
         return {
             "success": True,
             "status": "success",
-            "message": f"Triggered n8n workflow '{action}'",
+            "message": out_msg,
             "output": body or resp.text,
         }
     except requests.Timeout:

@@ -9,6 +9,10 @@ from typing import Callable, DefaultDict, List
 EventHandler = Callable[..., None]
 
 
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 class EventBus:
     """Lightweight event bus for decoupled communication."""
 
@@ -25,9 +29,10 @@ class EventBus:
         """Emit an event to all subscribers with debug logging."""
         with self._lock:
             callbacks = list(self._handlers.get(event, ()))
-        print(f"[EVENT] Emitting: {event}")
+        
+        logger.debug("[EVENT] Emitting: %s", event)
         for cb in callbacks:
             try:
                 cb(*args, **kwargs)
             except Exception as exc:  # noqa: BLE001
-                print(f"Handler for '{event}' failed: {exc}")
+                logger.error("Handler for '%s' failed: %s", event, exc)

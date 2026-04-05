@@ -15,6 +15,7 @@ from utils.logger import get_logger
 from config import MODEL_NAME, GEMINI_API_KEY, GROQ_API_KEY
 from utils.system_context import get_system_stats
 from core.mcp_hub import get_mcp_hub
+from brain.providers import registry
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 logger = get_logger(__name__)
@@ -26,12 +27,13 @@ You are a professional teammate, not just a tool. Your personality should be rem
 Available tools:
 * list_files, create_folder, delete_file, move_file, copy_file, rename_file, search_file, file_info: File system management.
 * download_file, download_video, convert_to_mp3, convert_to_pdf: Media / Web utilities.
-* trigger_n8n: Dynamic messaging/automation. Use "action": "whatsapp_msg" for WhatsApp.
-* open_app: Open applications by name. Use "start" or "start menu" for the OS menu.
+* trigger_n8n: Heavy automation and external API queries. Route complex requests here like Weather ("weather"), Crypto prices ("crypto"), Tech News ("news"), Jokes ("joke"), or Random Facts ("fact"). Example: {"action": "trigger_n8n", "target": "weather"}
+* skill:browser: Use this for autonomous web automation via Playwright. Examples: "search google for React", "go to youtube.com", "read this article". Target should be the instruction. (Format: {"action": "skill:browser", "target": "search google for..."}).
+* open_app: STRICTLY for opening installed LOCAL Desktop applications by name (e.g. "chrome", "notepad"). DO NOT use for websites like "youtube" or "netflix" - use open_url or skill:browser instead.
 * kill_process: Close applications by name (e.g. "chrome", "spotify").
 * open_url, media_control, power_state: Web/Media/System control.
 * capture_screen: Get a fresh high-res look at the screen (if background context is out-of-date).
-* quick_search: Web research.
+* quick_search: Simple web research.
 * set_personality: If the user expresses a preference, interest, or something about themselves, use this action to "learn" it. Format: {"action": "set_personality", "target": "category:value"}.
 
 Operational Guidelines (Phase 30: Personality & Learning):
@@ -40,6 +42,7 @@ Operational Guidelines (Phase 30: Personality & Learning):
 3. LEARNING: If the user says "I love Python" or "My name is Krish," use 'set_personality' to remember it. 
 4. BACKGROUND VISION: Reference the BACKGROUND VISUAL CONTEXT to show ambient awareness.
 5. CONCISION: Keep your 'message' short and professional, but elegantly phrased.
+
 
 Respond ONLY in JSON:
 {
@@ -51,33 +54,7 @@ Respond ONLY in JSON:
 """
 
 
-def _safe_json_extract(text: str) -> Dict[str, Any]:
-    try:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1:
-            raise ValueError("No JSON object found")
-        snippet = text[start : end + 1]
-        return json.loads(snippet)
-    except Exception:
-        return {"steps": [], "type": "ai", "message": "AI parsing failed"}
-
-
-def _validate_steps(data: Dict[str, Any]) -> Dict[str, Any]:
-    steps = data.get("steps", [])
-    message = data.get("message") or ""
-    if not isinstance(steps, list):
-        return {"steps": [], "type": "ai", "message": message or "AI parsing failed"}
-    cleaned = []
-    for step in steps:
-        if not isinstance(step, dict):
-            continue
-        action = step.get("action") or "unknown"
-        target = step.get("target") or ""
-        extra = step.get("extra") or {}
-        cleaned.append({"action": action, "target": target, "extra": extra})
-    return {"steps": cleaned, "type": "ai", "message": message}
-
+# Json extractors moved to brain.providers.base
 
 def _format_history(history: Iterable[Dict[str, Any]] | None) -> str:
     if not history:
@@ -144,7 +121,7 @@ def describe_screen(prompt: str = "What is on the screen?") -> str:
             img_data = f.read()
             
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-2.0-flash',
             contents=[
                 prompt,
                 types.Part.from_bytes(data=img_data, mime_type='image/png')
@@ -160,7 +137,10 @@ def interpret_command(
     user_input: str, history: Iterable[Dict[str, Any]] | None = None, relevant: Iterable[Dict[str, Any]] | None = None
 ) -> Dict[str, Any]:
     stats = get_system_stats()
-    sys_context = f"\nSYSTEM PERFORMANCE: CPU {stats['cpu_percent']}%, RAM {stats['memory_percent']}%"
+    import datetime
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    sys_context = f"\nCURRENT DATE & TIME: {current_time}"
+    sys_context += f"\nSYSTEM PERFORMANCE: CPU {stats['cpu_percent']}%, RAM {stats['memory_percent']}%"
     if stats['battery_percent'] is not None:
         sys_context += f", Battery {stats['battery_percent']}%"
     sys_context += f"\nACTIVE WINDOW: {stats['active_window']}"
@@ -205,61 +185,14 @@ def interpret_command(
     except Exception:
         pass
 
-    full_prompt = f"{SYSTEM_PROMPT}{mcp_tool_context}\n{sys_context}{personality_ctx}\n\nUser history:\n{history_text}\n\nRelevant past actions:\n{relevant_text}{screen_context}\n\nUser: {user_input}\nAssistant:"
+    context = f"{mcp_tool_context}\n{sys_context}{personality_ctx}\n\nUser history:\n{history_text}\n\nRelevant past actions:\n{relevant_text}{screen_context}"
 
-    # 1. Try Groq (Ultra-Low Latency Cloud AI - 0% PC Load)
-    if GROQ_API_KEY:
-        models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
-        for current_model in models:
-            try:
-                logger.info(f"[AI] Attempting Groq ({current_model})...")
-                client = Groq(api_key=GROQ_API_KEY, timeout=8.0)
-                completion = client.chat.completions.create(
-                    model=current_model,
-                    messages=[{"role": "user", "content": full_prompt}],
-                    temperature=0.1,
-                )
-                output = completion.choices[0].message.content
-                parsed = _safe_json_extract(output)
-                if parsed.get("steps"):
-                    logger.info(f"[AI] Groq ({current_model}) successful.")
-                    return _validate_steps(parsed)
-            except Exception as e:
-                if "429" in str(e) or "rate_limit" in str(e).lower():
-                    logger.warning(f"[AI] Groq {current_model} hit rate limit. Trying next model...")
-                    continue
-                logger.warning(f"[AI] Groq {current_model} failed: {e}")
-                break
-
-    # 2. Try Gemini (Cloud Fallback - 0% PC Load)
-    if GEMINI_API_KEY:
+    for provider in registry.get_providers():
         try:
-            logger.info("[AI] Attempting Gemini (Cloud Fallback)...")
-            client = genai.Client(api_key=GEMINI_API_KEY)
-            response = client.models.generate_content(
-                model='gemini-1.5-flash',
-                contents=full_prompt
-            )
-            parsed = _safe_json_extract(response.text)
-            if parsed.get("steps"):
-                logger.info("[AI] Gemini successful (Cloud).")
-                return _validate_steps(parsed)
+            return provider.generate_command(SYSTEM_PROMPT, context, user_input)
         except Exception as e:
-            logger.warning(f"[AI] Gemini failed: {e}")
-
-    # 3. Try Ollama (Local AI Last Resort - High PC Load)
-    try:
-        logger.info(f"[AI] Attempting Ollama ({MODEL_NAME} - High Resource Usage)...")
-        payload = {"model": MODEL_NAME, "prompt": full_prompt, "stream": False}
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=8)
-        resp.raise_for_status()
-        output = resp.json().get("response", "")
-        parsed = _safe_json_extract(output)
-        if parsed.get("steps"):
-            logger.info(f"[AI] Ollama ({MODEL_NAME}) successful.")
-            return _validate_steps(parsed)
-    except Exception as e:
-        logger.warning(f"[AI] Ollama failed (Local): {e}")
+            logger.debug(f"Provider {provider.name} failed: {e}")
+            continue
 
     fail_msg = "Sir, all AI systems are currently unresponsive. "
     if not GROQ_API_KEY and not GEMINI_API_KEY:
@@ -274,38 +207,11 @@ def query_ai(prompt: str, system_msg: str = "You are Jarvis, a professional copi
     """General text-in, text-out AI query for non-command tasks."""
     full_prompt = f"{system_msg}\n\nTask: {prompt}\n\nResponse:"
 
-    # 1. Try Groq
-    if GROQ_API_KEY:
+    for provider in registry.get_providers():
         try:
-            client = Groq(api_key=GROQ_API_KEY)
-            completion = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": full_prompt}],
-                temperature=0.3,
-            )
-            return completion.choices[0].message.content.strip()
-        except Exception:
-            pass
-
-    # 2. Try Ollama (Local)
-    try:
-        payload = {"model": MODEL_NAME, "prompt": full_prompt, "stream": False}
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=10)
-        if resp.status_code == 200:
-            return resp.json().get("response", "").strip()
-    except Exception:
-        pass
-
-    # 3. Try Gemini (Fallback - 0% PC Load)
-    if GEMINI_API_KEY:
-        try:
-            client = genai.Client(api_key=GEMINI_API_KEY)
-            response = client.models.generate_content(
-                model='gemini-1.5-flash',
-                contents=full_prompt
-            )
-            return response.text.strip()
-        except Exception:
-            pass
+            return provider.query(system_msg, prompt)
+        except Exception as e:
+            logger.debug(f"Provider {provider.name} query failed: {e}")
+            continue
 
     return "Jarvis AI is currently unavailable (No API keys or local model reachable)."

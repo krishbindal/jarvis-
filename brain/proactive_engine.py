@@ -6,6 +6,7 @@ SystemMonitor, and the EventBus. It decides whether to proactively
 notify the user (e.g., "High CPU usage", or "Can I help with that code?").
 """
 
+import hashlib
 import threading
 import time
 from typing import Optional
@@ -23,6 +24,7 @@ class ProactiveEngine:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._bus = event_bus
+        self._last_context_hash = None
 
     def start(self):
         if self._running:
@@ -57,6 +59,12 @@ class ProactiveEngine:
         if vision_ctx and vision_ctx != "No visual context yet.":
             context += f"\nScreen Context: {vision_ctx}"
 
+        ctx_hash = hashlib.sha256(context.encode('utf-8')).hexdigest()
+        if self._last_context_hash == ctx_hash:
+            return
+            
+        self._last_context_hash = ctx_hash
+
         prompt = f"""
         You are Jarvis's proactive subsystem. Analyze the following user context:
         {context}
@@ -65,16 +73,29 @@ class ProactiveEngine:
         or anything extremely obvious you can offer help with based on the screen?
         
         If NO, output strictly "NONE".
-        If YES, output a short 1-sentence notification to show on the screen (e.g. "Sir, CPU is high. Should I clear background apps?").
-        Do not output JSON, purely the notification string or NONE.
+        If YES, output in this exact format:
+        AUTONOMOUS_ACTION: <a concise command as if spoken by the user to address the issue>
+        Example: "AUTONOMOUS_ACTION: close heavy background apps"
+        Do not output JSON, purely the action string or NONE.
         """
         
         # We use a fast, low-temp query
         response = query_ai(prompt, system_msg="You determine if proactive help is needed.").strip()
         
         if response and response.upper() != "NONE" and "NONE" not in response.upper():
-            logger.info(f"[PROACTIVE] Emitting notification: {response}")
-            self._bus.emit("proactive_notification", {"message": response})
+            if "AUTONOMOUS_ACTION:" in response.upper():
+                try:
+                    action_text = response[response.upper().index("AUTONOMOUS_ACTION:") + len("AUTONOMOUS_ACTION:"):].strip()
+                    if action_text:
+                        logger.info(f"[PROACTIVE] Autonomous action triggered: {action_text}")
+                        # We emit an announcement notification and then emit the command
+                        self._bus.emit("proactive_notification", {"message": f"Sir, I am automatically running: {action_text}"})
+                        self._bus.emit("command_received", {"text": action_text, "source": "autonomous"})
+                except Exception as e:
+                    logger.error(f"[PROACTIVE] Failed to parse action from: {response} - {e}")
+            else:
+                logger.info(f"[PROACTIVE] Emitting notification: {response}")
+                self._bus.emit("proactive_notification", {"message": response})
 
 _engine: Optional[ProactiveEngine] = None
 

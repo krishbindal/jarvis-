@@ -241,7 +241,19 @@ def execute_action(
 ) -> Dict[str, Any]:
     """Execute a routed action with plugin system support and fallback logic."""
     extra = extra or {}
-    logger.debug(f"[EXEC] Action: {action}, Target: {target}")
+    
+    # ── Input Sanitization (Phase 32) ────────────────────────
+    # Some AI providers hallucinate argument names in the target string
+    if target:
+        # e.g. "name=chrome" -> "chrome", "app=spotify" -> "spotify"
+        if "=" in target and not target.startswith(("http", "www", "/")):
+            logger.warning(f"[EXEC] Sanitizing hallucinated target: {target}")
+            target = target.split("=")[-1].strip("'\" ")
+        
+        # Clean common punctuation injected by AI or STT
+        target = target.strip(" .!,?")
+
+    logger.info(f"[EXEC] action={action} target='{target}'")
 
     if action.startswith("mcp:"):
         hub = get_mcp_hub()

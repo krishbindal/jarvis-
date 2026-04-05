@@ -242,6 +242,10 @@ def _route_single(normalized: str) -> Dict:
     if normalized in _GREETINGS or any(normalized.startswith(g) for g in _GREETINGS):
         return _build("chat", normalized, "Greeting")
 
+    # ── 1.2. Stop / Cancel (High Priority Reset) ──────────────
+    if normalized in ("stop", "kill task", "shut up", "abort", "cancel", "stop everything", "reset"):
+        return _build("stop", "", "Sir, I am stopping all current tasks.")
+
     # ── 1.5. Plugin/Skill System (Phase 26) — MOVE TO TOP ─────
     skill_match = match_skill(normalized)
     if skill_match:

@@ -43,8 +43,10 @@ def launch_ui(event_bus: EventBus) -> None:
         event_bus.subscribe("toggle_main_window", _toggle_main)
 
         ui_logger.info("Entering event loop...")
-        exit_code = app.exec()
-        ui_logger.info("Event loop exited with code: %s", exit_code)
+        # Since app.exec() is blocking, we use it to keep the process alive
+        # but we return the objects first for persistence if called differently
+        # However, for this architecture, we just return them and let app.run() manage lifecycle.
+        return window, overlay
 
     except Exception as e:
         ui_logger.error("Fatal error during UI launch: %s", e, exc_info=True)

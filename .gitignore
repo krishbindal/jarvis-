@@ -34,3 +34,6 @@ assets/memory/*.webp
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# n8n Community Library (Templates with potential secrets)
+n8n_workflows/Community_Library/

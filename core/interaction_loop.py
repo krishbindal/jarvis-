@@ -14,10 +14,13 @@ logger = get_logger(__name__)
 
 
 ACKS = [
-    "Yes, on it.",
-    "Got it.",
+    "Of course, sir.",
+    "On it immediately.",
+    "Processing for you.",
     "Right away.",
-    "Understood.",
+    "Certainly.",
+    "I'm on it.",
+    "Understood, sir.",
 ]
 
 ACTION_VERBS = {

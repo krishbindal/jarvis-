@@ -31,6 +31,11 @@ class WakeWordDetector:
         self._thread: Optional[threading.Thread] = None
         self._model = None
         self._use_oww = False
+        
+        # Debouncing and state management
+        self._last_trigger_ts = 0.0
+        self._cooldown_s = 5.0
+        self._is_handling_command = False
 
         # Try to load openwakeword
         try:
@@ -45,6 +50,12 @@ class WakeWordDetector:
             )
             self._use_oww = True
             logger.info("[WAKEWORD] openwakeword loaded with 'hey_jarvis' model.")
+            
+            # Listen for command completion to re-enable wake word
+            if self._events:
+                self._events.subscribe("command_complete", self._on_command_complete)
+                self._events.subscribe("jarvis_wake", self._on_external_wake)
+                self._events.subscribe("system_shutdown", self.stop)
         except Exception as e:
             logger.warning("[WAKEWORD] openwakeword not available (%s). Using keyword fallback.", e)
             self._use_oww = False
@@ -97,9 +108,20 @@ class WakeWordDetector:
                 prediction = self._model.predict(audio_data)
 
                 # Check all model scores
+                now = time.monotonic()
                 for model_name, score in prediction.items():
                     if score > self._sensitivity:
+                        if self._is_handling_command:
+                            logger.debug("[WAKEWORD] Ignoring detection: Already listening.")
+                            return
+                        
+                        if now - self._last_trigger_ts < self._cooldown_s:
+                            logger.debug("[WAKEWORD] Ignoring detection: Cooldown active.")
+                            return
+
                         logger.info("[WAKEWORD] Detected '%s' (score=%.3f)", model_name, score)
+                        self._last_trigger_ts = now
+                        self._is_handling_command = True
                         self._on_wake_detected()
                         self._model.reset()  # Reset to avoid repeat triggers
                         return
@@ -121,3 +143,13 @@ class WakeWordDetector:
             notify("🎤 Jarvis Activated", "Listening for your command...")
         except Exception:
             pass
+
+    def _on_command_complete(self, payload=None) -> None:
+        """Reset state when command finishes."""
+        self._is_handling_command = False
+        logger.debug("[WAKEWORD] System ready for next wake word.")
+
+    def _on_external_wake(self, payload=None) -> None:
+        """Track activation from other sources (e.g., clap)."""
+        self._is_handling_command = True
+        self._last_trigger_ts = time.monotonic()
