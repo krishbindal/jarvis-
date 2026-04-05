@@ -7,16 +7,23 @@ import threading
 import io
 import wave
 import requests
+import os
+import time
 from pathlib import Path
 from typing import Optional
 
-import sounddevice as sd
-
-import config
 from utils.logger import get_logger
 from utils.connectivity import is_online
 
 logger = get_logger(__name__)
+
+try:
+    import sounddevice as sd
+except Exception as exc:  # noqa: BLE001
+    sd = None
+    logger.error("sounddevice is not available: %s", exc)
+
+import config
 
 try:
     from vosk import KaldiRecognizer, Model
@@ -170,8 +177,9 @@ class VoiceListener:
             logger.debug(f"[VOICE] Online transcription failed: {e}")
             return None
 
-    def _on_jarvis_wake(self, payload: dict):
+    def _on_jarvis_wake(self, payload: Optional[dict] = None):
         """Handle wake-up event by preparing for command input."""
+        payload = payload or {}
         now = time.time()
         
         # 2-second Cooldown: prevent self-triggering loops if echo cancellation fails
@@ -190,7 +198,7 @@ class VoiceListener:
             
         # Acknowledge (skip if it was an internal relay to avoid loop)
         if payload.get("source") != "app_internal":
-            from core.interactions import speak
+            from voice.tts_engine import speak
             speak("Yes, sir?")
         
     def _on_overlay_state(self, payload: dict):
@@ -310,6 +318,9 @@ class VoiceListener:
 
     def start(self):
         if self._running or self.model is None or self.rec is None:
+            return
+        if sd is None:
+            logger.warning("[VOICE] sounddevice missing; voice listener disabled.")
             return
         self._running = True
         self._thread = threading.Thread(target=self._run, name="voice-listener-thread", daemon=True)

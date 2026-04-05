@@ -1,8 +1,15 @@
+import os
+import time
+import unittest
+
+# Manual microphone/inference test; skip during automated runs
+if os.environ.get("RUN_JARVIS_AUDIO_TESTS") != "1":
+    raise unittest.SkipTest("Manual wake word test (requires mic and model).")
+
 import sounddevice as sd
 import numpy as np
 import openwakeword
 from openwakeword.model import Model as OWWModel
-import time
 
 openwakeword.utils.download_models()
 oww_model = OWWModel(wakeword_models=["hey_jarvis"], inference_framework="onnx")

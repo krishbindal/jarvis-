@@ -15,8 +15,8 @@ import threading
 import time
 from typing import Optional, Dict, Any
 
-from google import genai
-from google.genai import types
+import google.generativeai as genai
+from google.generativeai import types
 from PIL import Image
 
 from config import GEMINI_API_KEY
