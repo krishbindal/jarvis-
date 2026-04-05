@@ -18,9 +18,9 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 
 SYSTEM_PROMPT = """
 You are Jarvis, an autonomous agent. Plan the NEXT action(s) only — no hardcoded app/site flows.
-Preferred reply format:
+Strict reply format:
 ACTION: <tool>("input") # optional short reason
-...multiple ACTION lines allowed...
+...multiple ACTION lines allowed (max 3)...
 FINAL: <concise status/message>
 OR reply as JSON: {"steps":[{"tool":"...", "input":"...", "reason":"..."}], "message":"..."}.
 Available tools:
@@ -68,7 +68,7 @@ def _extract_json(text: str) -> Dict[str, Any]:
 
 
 _ACTION_RE = re.compile(
-    r"action\s*:\s*(?P<tool>[a-zA-Z_]+)(?:\s*\(\s*(?P<input>[^)]*)\s*\))?",
+    r"^\s*action\s*:\s*(?P<tool>[a-zA-Z_]+)(?:\s*\(\s*(?P<input>[^)]*)\s*\))?",
     re.IGNORECASE,
 )
 
@@ -107,7 +107,7 @@ Rules:
 - Reuse current_app/current_url when present instead of re-opening surfaces.
 - When uncertain, call get_active_app or read_screen before acting.
 - No site/app-specific logic; rely only on the tools and context.
-Respond with ACTION lines or JSON as specified."""
+- Respond ONLY with the strict format: ACTION: <tool>(\"input\") #reason and a FINAL line, or the JSON equivalent."""
 
     raw = ""
     try:
