@@ -1,0 +1,327 @@
+{
+  "name": "JARVIS Omniscient Intelligence Hub",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "morning-cron",
+      "name": "Morning Briefing (8 AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "proactive-trigger",
+        "options": {}
+      },
+      "id": "manual-webhook",
+      "name": "Manual Proactive Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        -200,
+        200
+      ],
+      "webhookId": "jarvis-manual-ping"
+    },
+    {
+      "parameters": {
+        "url": "https://hacker-news.firebaseio.com/v0/topstories.json",
+        "options": {}
+      },
+      "id": "fetch-hn-stories",
+      "name": "Fetch HN Stories",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        100,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://hacker-news.firebaseio.com/v0/item/{{ $json.data[0] }}.json",
+        "options": {}
+      },
+      "id": "fetch-hn-detail",
+      "name": "Fetch Top Story",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        300,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://wttr.in/?format=3",
+        "options": {}
+      },
+      "id": "fetch-weather",
+      "name": "Fetch Weather",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        100,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "ai-morning-chain",
+      "name": "AI Morning Briefing",
+      "type": "@n8n/n8n-nodes-langchain.chainSummarization",
+      "typeVersion": 1,
+      "position": [
+        600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5001/notification",
+        "sendParameters": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "={{ $json.text || $json.body.message || 'Sir, everything is prepared for your morning session.' }}"
+            },
+            {
+              "name": "title",
+              "value": "Proactive Intelligence"
+            },
+            {
+              "name": "priority",
+              "value": "high"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dispatch-to-jarvis",
+      "name": "Dispatch to JARVIS-X",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "q": "is:unread is:important"
+        },
+        "options": {}
+      },
+      "id": "gmail-monitor",
+      "name": "Gmail Important Monitor",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [
+        -200,
+        450
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Decide if this email is urgent. If it is, summarize it concisely for a voice notification. Otherwise return 'SKIP'.\n\nSubject: {{ $json.subject }}\nSnippet: {{ $json.snippet }}",
+        "options": {}
+      },
+      "id": "ai-email-agent",
+      "name": "AI Email Classifier",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.1,
+      "position": [
+        600,
+        450
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "gemini-pro",
+        "options": {}
+      },
+      "id": "gemini-model",
+      "name": "Google Gemini",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        500,
+        150
+      ]
+    },
+    {
+      "parameters": {
+        "model": "llama3-70b-8192",
+        "options": {}
+      },
+      "id": "groq-model",
+      "name": "Groq Llama 3",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        500,
+        600
+      ]
+    }
+  ],
+  "connections": {
+    "Morning Briefing (8 AM)": {
+      "main": [
+        [
+          {
+            "node": "Fetch HN Stories",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Weather",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch HN Stories": {
+      "main": [
+        [
+          {
+            "node": "Fetch Top Story",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Top Story": {
+      "main": [
+        [
+          {
+            "node": "AI Morning Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Weather": {
+      "main": [
+        [
+          {
+            "node": "AI Morning Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Morning Briefing": {
+      "main": [
+        [
+          {
+            "node": "Dispatch to JARVIS-X",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Morning Briefing",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Llama 3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Email Classifier",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Proactive Trigger": {
+      "main": [
+        [
+          {
+            "node": "Dispatch to JARVIS-X",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Important Monitor": {
+      "main": [
+        [
+          {
+            "node": "AI Email Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Email Classifier": {
+      "main": [
+        [
+          {
+            "node": "Dispatch to JARVIS-X",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "omniscient_hub_v2",
+  "meta": {
+    "templateId": "jarvis-omniscience-002"
+  }
+}

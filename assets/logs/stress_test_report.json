@@ -1,0 +1,350 @@
+[
+    {
+        "id": 1,
+        "command": "open chrome and search best laptops under 1 lakh and then open first result",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "skill:browser",
+                "success": true
+            },
+            {
+                "action": "open_app",
+                "success": true
+            }
+        ],
+        "time": 0.004804134368896484
+    },
+    {
+        "id": 2,
+        "command": "open youtube and search lo-fi music and then play first video",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "skill:browser",
+                "success": true
+            },
+            {
+                "action": "skill:music",
+                "success": true
+            }
+        ],
+        "time": 0.0010271072387695312
+    },
+    {
+        "id": 3,
+        "command": "open google and search python tutorial and then scroll down",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "skill:browser",
+                "success": true
+            },
+            {
+                "action": "skill:system_agent",
+                "success": true
+            }
+        ],
+        "time": 0.0029261112213134766
+    },
+    {
+        "id": 4,
+        "command": "open chrome and search instagram and then open it and then scroll for 5 seconds",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "skill:browser",
+                "success": true
+            },
+            {
+                "action": "open_app",
+                "success": true
+            },
+            {
+                "action": "skill:system_agent",
+                "success": true
+            }
+        ],
+        "time": 0.002119302749633789
+    },
+    {
+        "id": 5,
+        "command": "open whatsapp and send hi to Krish and then open instagram",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "skill:communication",
+                "success": true
+            },
+            {
+                "action": "skill:instagram",
+                "success": true
+            }
+        ],
+        "time": 0.0009081363677978516
+    },
+    {
+        "id": 6,
+        "command": "open chrome and search weather and extract temperature",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "open_app",
+                "success": true
+            },
+            {
+                "action": "skill:browser",
+                "success": true
+            },
+            {
+                "action": "skill:system_agent",
+                "success": true
+            }
+        ],
+        "time": 0.0017118453979492188
+    },
+    {
+        "id": 7,
+        "command": "open chrome",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "open_app",
+                "success": true
+            }
+        ],
+        "time": 0.0007395744323730469
+    },
+    {
+        "id": 8,
+        "command": "search youtube",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "skill:browser",
+                "success": true
+            }
+        ],
+        "time": 0.0004990100860595703
+    },
+    {
+        "id": 9,
+        "command": "open youtube and play a video",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "open_dynamic",
+                "success": true
+            },
+            {
+                "action": "skill:music",
+                "success": true
+            }
+        ],
+        "time": 0.0011682510375976562
+    },
+    {
+        "id": 10,
+        "command": "pause it",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "media_control",
+                "success": true
+            }
+        ],
+        "time": 0.0007352828979492188
+    },
+    {
+        "id": 11,
+        "command": "open downloads folder and sort files by date",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "open_folder",
+                "success": true
+            },
+            {
+                "action": "skill:system_agent",
+                "success": true
+            }
+        ],
+        "time": 0.0017020702362060547
+    },
+    {
+        "id": 12,
+        "command": "create a folder named test123 in desktop and open it",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "skill:system_agent",
+                "success": true
+            },
+            {
+                "action": "open_app",
+                "success": true
+            }
+        ],
+        "time": 0.0017752647399902344
+    },
+    {
+        "id": 13,
+        "command": "search for a pdf file in downloads and open it",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "skill:browser",
+                "success": true
+            },
+            {
+                "action": "open_app",
+                "success": true
+            }
+        ],
+        "time": 0.0011382102966308594
+    },
+    {
+        "id": 14,
+        "command": "download a youtube video and convert it to mp3",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "skill:system_agent",
+                "success": true
+            },
+            {
+                "action": "skill:system_agent",
+                "success": true
+            }
+        ],
+        "time": 0.0010933876037597656
+    },
+    {
+        "id": 15,
+        "command": "search wallpaper and download first image",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "skill:browser",
+                "success": true
+            },
+            {
+                "action": "skill:system_agent",
+                "success": true
+            }
+        ],
+        "time": 0.0010759830474853516
+    },
+    {
+        "id": 16,
+        "command": "i want to listen to music, do something",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "skill:system_agent",
+                "success": true
+            }
+        ],
+        "time": 0.0010275840759277344
+    },
+    {
+        "id": 17,
+        "command": "i am bored, open something interesting",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "skill:system_agent",
+                "success": true
+            }
+        ],
+        "time": 0.0009524822235107422
+    },
+    {
+        "id": 18,
+        "command": "talk to Krish and say i will call later",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "skill:system_agent",
+                "success": true
+            },
+            {
+                "action": "skill:system_agent",
+                "success": true
+            }
+        ],
+        "time": 0.0017616748809814453
+    },
+    {
+        "id": 19,
+        "command": "open chrome and search python tutorial and open first video and play it",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "open_app",
+                "success": true
+            },
+            {
+                "action": "skill:browser",
+                "success": true
+            },
+            {
+                "action": "open_app",
+                "success": true
+            },
+            {
+                "action": "skill:music",
+                "success": true
+            }
+        ],
+        "time": 0.002065896987915039
+    },
+    {
+        "id": 20,
+        "command": "open google and search best phones and open 2 results and compare them",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "open_dynamic",
+                "success": true
+            },
+            {
+                "action": "skill:browser",
+                "success": true
+            },
+            {
+                "action": "open_app",
+                "success": true
+            },
+            {
+                "action": "skill:system_agent",
+                "success": true
+            }
+        ],
+        "time": 0.002588510513305664
+    },
+    {
+        "id": 21,
+        "command": "open something that doesn't exist",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "open_app",
+                "success": true
+            }
+        ],
+        "time": 0.0010347366333007812
+    },
+    {
+        "id": 22,
+        "command": "send message to unknown person",
+        "status": "PASSED",
+        "steps": [
+            {
+                "action": "skill:communication",
+                "success": true
+            }
+        ],
+        "time": 0.0005061626434326172
+    }
+]

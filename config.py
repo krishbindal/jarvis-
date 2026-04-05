@@ -25,8 +25,9 @@ MODEL_NAME = os.getenv("MODEL_NAME", "llama3")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
-# Integrations and execution
-N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "https://your-n8n-url/webhook/jarvis")
+# n8n Integration
+N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "http://localhost:5678/webhook/action")
+N8N_NOTIFY_PORT = 5001  # Internal port for n8n to JARVIS communication
 SAFE_DIRECTORIES = [
     os.path.expanduser("~/Downloads"),
     os.path.expanduser("~/Desktop"),

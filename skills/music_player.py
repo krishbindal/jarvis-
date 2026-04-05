@@ -81,7 +81,7 @@ def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
     import re
     target_lower = target.lower().strip()
 
-    # Stop/Pause
+    # 1. Handle Stop/Pause
     if any(w in target_lower for w in ["stop", "pause"]):
         try:
             import pygame
@@ -92,17 +92,58 @@ def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
         except Exception as e:
             return {"success": False, "status": "error", "message": str(e)}
 
-    # Extract search query
+    # 2. Determine Action: Play vs Download
+    is_download = "download" in target_lower
+    
+    # 3. Clean query
     query = target_lower
-    for prefix in ["play some ", "play ", "music "]:
+    # Remove common prefixes
+    for prefix in ["download ", "play some ", "play ", "music "]:
         if query.startswith(prefix):
             query = query[len(prefix):]
             break
+    
+    # Remove " for me", " any", etc
+    query = re.sub(r"\b(for me|any|song|songs|track|beats)\b", "", query).strip()
 
-    if not query or query in ("music", "song", "songs", "beats"):
+    if not query or query == "":
         query = "lofi hip hop beats"
 
-    # Play in background thread
+    # 4. Set paths
+    if is_download:
+        # Download to C:\Users\krish\Downloads as requested
+        download_dir = os.path.join("C:\\", "Users", "krish", "Downloads")
+        os.makedirs(download_dir, exist_ok=True)
+        # Use query as filename
+        safe_name = "".join(x if x.isalnum() or x in " -_" else "_" for x in query)
+        output_path = os.path.join(download_dir, f"{safe_name}.mp3")
+        
+        logger.info("[MUSIC] Downloading song to: %s", output_path)
+        
+        def _download_task():
+            cmd = [
+                "yt-dlp",
+                f"ytsearch1:{query}",
+                "--extract-audio",
+                "--audio-format", "mp3",
+                "--audio-quality", "5",
+                "-o", output_path,
+                "--no-playlist",
+                "--quiet",
+            ]
+            subprocess.run(cmd, timeout=60)
+            logger.info("[MUSIC] Download complete: %s", output_path)
+
+        threading.Thread(target=_download_task, daemon=True).start()
+        
+        return {
+            "success": True,
+            "status": "success",
+            "message": f"I am downloading '{query}' to your Downloads folder, Sir.",
+            "output": output_path
+        }
+
+    # 5. Regular Playback
     threading.Thread(target=_search_and_play, args=[query], daemon=True).start()
 
     return {

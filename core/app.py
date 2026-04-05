@@ -54,6 +54,7 @@ from executor import agent_tools
 from automation.planner import build_automation_plan
 from automation.executor import execute_automation_plan
 from brain.autonomy_engine import get_autonomy_engine
+from core.web_server import JarvisWebServer
 
 logger = get_logger(__name__)
 
@@ -114,6 +115,7 @@ class JarvisApp:
         self._context = ContextState()
         self._events.subscribe("interrupt_tts", lambda *_: self._interactions.stop())
         self._autonomy = None
+        self._web_server = JarvisWebServer(self._events)
 
         # Phase 26: Start MCP Hub (Open Interpreter, Playwright, etc.)
         try:
@@ -194,6 +196,10 @@ class JarvisApp:
 
         # Phase 30+: Start autonomy engine (background observer & scheduler)
         self._start_autonomy_loop()
+
+        # Phase 33: Start proactive web server for n8n
+        self._web_server.start()
+        logger.info("[WEB-SERVER] Proactive n8n hub listening.")
 
         # Phase 22: Start clipboard monitor
         self._clipboard.start()

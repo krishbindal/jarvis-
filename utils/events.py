@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections import defaultdict
-from typing import Callable, DefaultDict, List
+from typing import Callable, DefaultDict, List, Optional
 
 EventHandler = Callable[..., None]
 
@@ -36,3 +36,13 @@ class EventBus:
                 cb(*args, **kwargs)
             except Exception as exc:  # noqa: BLE001
                 logger.error("Handler for '%s' failed: %s", event, exc)
+
+# Singleton Registry
+_event_bus: Optional[EventBus] = None
+
+def get_event_bus() -> EventBus:
+    """Return the global EventBus singleton."""
+    global _event_bus
+    if _event_bus is None:
+        _event_bus = EventBus()
+    return _event_bus

@@ -170,6 +170,65 @@ class VisionProvider:
             logger.error("[VISION] Analysis failed: %s", e)
             return self._last_summary
 
+    def find_element(self, element_description: str) -> Optional[tuple[int, int]]:
+        """
+        Use Vision to find the (x, y) coordinates of a UI element.
+        Returns scaled (x, y) for the current screen resolution.
+        """
+        try:
+            import mss
+            with mss.mss() as sct:
+                # Capture the primary monitor for UI interaction
+                monitor = sct.monitors[1]
+                screenshot = sct.grab(monitor)
+                real_width = monitor["width"]
+                real_height = monitor["height"]
+
+            img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+            
+            # Encode for Gemini
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=70)
+            img_data = buf.getvalue()
+
+            prompt = f"""Analyze this screenshot. Find the [x, y] center coordinates of: {element_description}.
+            Return ONLY a JSON object: {{"x": 0-1000, "y": 0-1000}}. 
+            Example: {{"x": 500, "y": 500}} for the exact center.
+            If not visible, return {{"x": -1, "y": -1}}."""
+
+            genai.configure(api_key=GEMINI_API_KEY)
+            model = genai.GenerativeModel(VISION_MODEL)
+            
+            response = model.generate_content(
+                contents=[
+                    prompt,
+                    {"mime_type": "image/jpeg", "data": img_data}
+                ]
+            )
+
+            text = response.text.strip()
+            # Extract JSON
+            import re, json
+            match = re.search(r'\{.*\}', text, re.DOTALL)
+            if not match:
+                logger.warning(f"[VISION] No JSON found in response: {text}")
+                return None
+
+            coords = json.loads(match.group())
+            if coords["x"] == -1:
+                return None
+
+            # Scale to real resolution
+            final_x = int((coords["x"] / 1000.0) * real_width) + monitor["left"]
+            final_y = int((coords["y"] / 1000.0) * real_height) + monitor["top"]
+
+            logger.info(f"[VISION] Found '{element_description}' at ({final_x}, {final_y})")
+            return (final_x, final_y)
+
+        except Exception as e:
+            logger.error(f"[VISION] find_element failed: {e}")
+            return None
+
 
 # Global singleton
 _provider: Optional[VisionProvider] = None

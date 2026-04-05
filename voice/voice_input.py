@@ -85,6 +85,7 @@ class VoiceListener:
         self._is_jarvis_speaking = False
         self._last_wake_time = 0.0  # Cooldown tracker (Phase 32)
         self._last_audio_ts = time.time()
+        self._last_speaking_ts = 0.0  # Echo suppression (Phase 32)
         self._silence_start_ts = time.time()
         self._max_listen_time = 7.0 # Total listening window before force-flush
         
@@ -206,16 +207,22 @@ class VoiceListener:
         
     def _on_overlay_state(self, payload: dict):
         """Track if JARVIS is speaking to avoid hearing himself."""
-        state = payload.get("state")
+        state = payload.get("state", "").lower()
         self._is_jarvis_speaking = (state == "speaking")
+        if self._is_jarvis_speaking:
+            self._last_speaking_ts = time.time()
+        else:
+            # Mark when he stopped for a short cooldown
+            self._last_speaking_ts = time.time()
 
     def _callback(self, indata, frames, time_info, status):
         """Audio callback from sounddevice."""
         if status:
             logger.debug("Audio status: %s", status)
 
-        # Echo Cancellation: Ignore audio while JARVIS is speaking
-        if self._is_jarvis_speaking:
+        # Echo Cancellation: Ignore audio while JARVIS is speaking + 500ms grace
+        now = time.time()
+        if self._is_jarvis_speaking or (now - self._last_speaking_ts < 0.5):
             return
 
         if self.ambient_mode and not self._listening_for_command:

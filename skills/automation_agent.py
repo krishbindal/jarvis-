@@ -15,7 +15,9 @@ SKILL_DESCRIPTION = "Trigger external automated logic and smart home actions via
 SKILL_PATTERNS = [
     r"trigger\s+(?:the\s+)?(workflow|macro|automation)\s*(.*)?$",
     r"turn\s+(on|off)\s+(?:the\s+)?(.*)$",
-    r"start\s+(?:the\s+)?(?:workflow|macro|n8n)\s*(.*)?$"
+    r"start\s+(?:the\s+)?(?:workflow|macro|n8n)\s*(.*)?$",
+    r"(search|download|find)\s+(?:for\s+)?(?:a\s+)?ringtone",
+    r"surf\s+(?:the\s+)?web\s+and\s+search\s+for\s+(.+)$"
 ]
 
 def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
