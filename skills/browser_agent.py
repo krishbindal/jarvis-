@@ -80,6 +80,35 @@ def _run_browser_task(task_type: str, query: str) -> Dict[str, Any]:
                     "message": f"Page content (first 2000 chars):\n{text[:500]}...",
                     "output": text,
                 }
+            
+            elif task_type == "scroll":
+                logger.execution("Scrolling browser...")
+                page.mouse.wheel(0, 800)
+                import time
+                time.sleep(2)
+                return {"success": True, "message": "Sir, I have scrolled down the page."}
+
+            elif task_type == "click_first":
+                logger.execution("Clicking first result...")
+                # Modern Google results often use h3 or specific anchor tags
+                selector = "h3 >> nth=0"
+                if page.query_selector(selector):
+                    page.click(selector)
+                    return {"success": True, "message": "Sir, I have opened the first result."}
+                return {"success": False, "message": "Could not find a clickable result."}
+
+            elif task_type == "extract":
+                logger.execution(f"Extracting data for: {query}")
+                # For weather/temp, LLM-based selector search or hardcoded common ones
+                if "weather" in query or "temperature" in query:
+                    temp = page.query_selector("#wob_tm") # Google specialized weather widget
+                    if temp:
+                        val = temp.inner_text()
+                        return {"success": True, "message": f"The current temperature is {val}°C, Sir."}
+                
+                # Generic fallback: just return truncated text
+                text = page.inner_text("body")[:500]
+                return {"success": True, "message": f"Extracted: {text}"}
 
     except ImportError:
         return {
@@ -96,6 +125,19 @@ def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
     """Route browser commands."""
     import re
     target_lower = target.lower().strip()
+
+    target_lower = target.lower().strip()
+    logger.action(f"Browser Task: {target_lower}")
+
+    # Advanced Multi-Step Handlers
+    if "open" in target_lower and "result" in target_lower:
+        return _run_browser_task("click_first", "")
+    
+    if "scroll" in target_lower:
+        return _run_browser_task("scroll", target_lower)
+
+    if "extract" in target_lower or "weather" in target_lower:
+        return _run_browser_task("extract", target_lower)
 
     # Detect task type
     if any(w in target_lower for w in ["search", "google", "look up", "find"]):

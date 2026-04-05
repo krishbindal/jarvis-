@@ -11,6 +11,7 @@ import os
 import threading
 import sys
 import types
+import time
 from utils.logger import get_logger
 
 try:
@@ -79,7 +80,11 @@ class TTSEngine:
         self._is_speaking = False
         self._interrupted = False
         self._events = event_bus
+        self._mixer_available = pygame.mixer.get_init() is not None
         
+        if not self._mixer_available:
+            logger.warning("[TTS] TTS Engine started in SILENT mode (no audio mixer).")
+
         if self._events:
             self._events.subscribe("interrupt_tts", self.stop)
 
@@ -116,6 +121,10 @@ class TTSEngine:
                 if not text.strip():
                     return
 
+                tmp_path = None
+                ducking_applied = False
+                old_music_vol = 1.0
+
                 try:
                     # Defensive: Ensure mixer is still alive
                     if not pygame.mixer.get_init():
@@ -128,25 +137,31 @@ class TTSEngine:
                     asyncio.run(self._synthesize(text, tmp_path))
 
                     # 2. Audio Ducking — Lower music volume if active
-                    ducking_applied = False
-                    old_music_vol = 1.0
                     if pygame.mixer.music.get_busy():
                         old_music_vol = pygame.mixer.music.get_volume()
                         pygame.mixer.music.set_volume(old_music_vol * 0.2) # Drop to 20%
                         ducking_applied = True
 
                     # 3. Play as Sound on a dedicated channel
-                    sound = pygame.mixer.Sound(tmp_path)
-                    channel = pygame.mixer.Channel(0)
-                    channel.play(sound)
-                    
-                    self._interrupted = False
-                    # Wait for sound to finish
-                    while channel.get_busy():
-                        if self._interrupted:
-                            channel.stop()
-                            break
-                        pygame.time.Clock().tick(10)
+                    if self._mixer_available:
+                        try:
+                            sound = pygame.mixer.Sound(tmp_path)
+                            channel = pygame.mixer.Channel(0)
+                            channel.play(sound)
+                            
+                            self._interrupted = False
+                            # Wait for sound to finish
+                            while channel.get_busy():
+                                if self._interrupted:
+                                    channel.stop()
+                                    break
+                                pygame.time.Clock().tick(10)
+                        except Exception as play_err:
+                            logger.error(f"[TTS] Playback failed: {play_err}")
+                    else:
+                        # Log but don't fail — we already signaled overlay state
+                        logger.debug(f"[TTS] Silent play (mixer unavailable): {text[:20]}...")
+                        time.sleep(len(text) * 0.05) # Brief pause to simulate speech time
 
                 except Exception as e:
                     logger.error(f"TTS Synthesis failed: {e}")
@@ -160,9 +175,9 @@ class TTSEngine:
                             
                     self._is_speaking = False
                     if self._events:
-                        self._events.emit("overlay_state", {"state": "IDLE"})
+                        self._events.emit("overlay_state", {"state": "idle"})
                     # 5. Cleanup temp file
-                    if os.path.exists(tmp_path):
+                    if tmp_path and os.path.exists(tmp_path):
                         try:
                             os.remove(tmp_path)
                         except Exception:

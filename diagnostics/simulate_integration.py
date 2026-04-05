@@ -42,7 +42,7 @@ def run_simulation():
     time.sleep(3)
     
     # Clean up simulation folder
-    sim_folder = os.path.expanduser("~/Documents/test_sim")
+    sim_folder = "C:\\test_sim"
     if os.path.exists(sim_folder):
         print(f"[SUCCESS] Multi-step created folder: {sim_folder}")
         try:

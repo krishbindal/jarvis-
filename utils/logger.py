@@ -33,6 +33,40 @@ logging.basicConfig(
     handlers=[file_handler, stream_handler]
 )
 
-def get_logger(name: str) -> logging.Logger:
-    """Return a logger with pre-configured multi-output handlers."""
-    return logging.getLogger(name)
+class SentinelLogger:
+    """Enhanced logger for JARVIS-X with structured tags."""
+    def __init__(self, name: str):
+        self._logger = logging.getLogger(name)
+
+    def debug(self, msg: str, *args, **kwargs):
+        self._logger.debug(msg, *args, **kwargs)
+
+    def info(self, msg: str, *args, **kwargs):
+        self._logger.info(msg, *args, **kwargs)
+
+    def warning(self, msg: str, *args, **kwargs):
+        self._logger.warning(msg, *args, **kwargs)
+
+    def error(self, msg: str, *args, **kwargs):
+        self._logger.error(f"[ERROR] {msg}", *args, **kwargs)
+
+    def critical(self, msg: str, *args, **kwargs):
+        self._logger.critical(f"[CRITICAL] {msg}", *args, **kwargs)
+
+    # Structured Tags
+    def input(self, msg: str):
+        self._logger.info(f"[INPUT] {msg}")
+
+    def parsed(self, msg: str):
+        self._logger.info(f"[PARSED] {msg}")
+
+    def action(self, msg: str):
+        self._logger.info(f"[ACTION] {msg}")
+
+    def execution(self, msg: str):
+        self._logger.info(f"[EXECUTION] {msg}")
+
+
+def get_logger(name: str) -> SentinelLogger:
+    """Return a SentinelLogger with pre-configured handlers."""
+    return SentinelLogger(name)

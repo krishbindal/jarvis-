@@ -202,24 +202,34 @@ def file_info(path: str) -> Dict:
 def execute_file_command(action: str, target: str, extra: dict | None = None) -> Dict:
     extra = extra or {}
     if action == "list_files":
+        logger.execution(f"list_files -> {target}")
         return list_files(target)
     if action == "create_folder":
+        logger.execution(f"create_folder -> {target}")
         return create_folder(target, extra.get("path"))
     if action == "delete_file":
+        logger.execution(f"delete_file -> {target}")
         return delete_file(target)
     if action == "move_file":
+        logger.execution(f"move_file -> {target} (src: {extra.get('source')})")
         return move_file(extra.get("source", ""), target)
     if action == "copy_file":
+        logger.execution(f"copy_file -> {target} (src: {extra.get('source')})")
         return copy_file(extra.get("source", ""), target)
     if action == "rename_file":
+        logger.execution(f"rename_file -> {target} (to: {extra.get('new_name')})")
         return rename_file(target, extra.get("new_name", ""))
     if action == "search_file":
+        logger.execution(f"search_file -> {target}")
         return search_file(target, extra.get("root_path", ""))
     if action == "file_info":
+        logger.execution(f"file_info -> {target}")
         return file_info(target)
     if action == "open_app":
+        logger.execution(f"open_app -> {target}")
         return open_app(target)
     if action == "kill_process":
+        logger.execution(f"kill_process -> {target}")
         return kill_process(target)
     return {"success": False, "message": f"Unsupported action: {action}"}
 

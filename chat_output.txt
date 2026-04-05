@@ -1,0 +1,36 @@
+C:\Users\krish\Desktop\Jarvis-Test\brain\ai_engine.py:11: FutureWarning: 
+
+All support for the `google.generativeai` package has ended. It will no longer be receiving 
+updates or bug fixes. Please switch to the `google.genai` package as soon as possible.
+See README for more details:
+
+https://github.com/google-gemini/deprecated-generative-ai-python/blob/main/README.md
+
+  import google.generativeai as genai
+2026-04-06 03:04:07,000 - brain.providers.groq - INFO - [AI] Attempting Groq (llama-3.3-70b-versatile)...
+2026-04-06 03:04:08,111 - httpx - INFO - HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-06 03:04:08,123 - brain.providers.groq - INFO - [AI] Attempting Groq (llama-3.1-8b-instant)...
+2026-04-06 03:04:08,899 - httpx - INFO - HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-06 03:04:08,900 - brain.providers.groq - INFO - [AI] Groq (llama-3.1-8b-instant) successful.
+2026-04-06 03:04:08,902 - brain.providers.groq - INFO - [AI] Attempting Groq (llama-3.3-70b-versatile)...
+2026-04-06 03:04:09,771 - httpx - INFO - HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-06 03:04:09,772 - brain.providers.groq - INFO - [AI] Attempting Groq (llama-3.1-8b-instant)...
+2026-04-06 03:04:10,660 - httpx - INFO - HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-06 03:04:10,660 - brain.providers.groq - INFO - [AI] Groq (llama-3.1-8b-instant) successful.
+2026-04-06 03:04:10,662 - brain.providers.groq - INFO - [AI] Attempting Groq (llama-3.3-70b-versatile)...
+2026-04-06 03:04:11,351 - httpx - INFO - HTTP Request: POST https://api.groq.com/openai/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-06 03:04:11,351 - brain.providers.groq - INFO - [AI] Groq (llama-3.3-70b-versatile) successful.
+Initializing JARVIS-X Brain Test Protocol...
+
+User: Hello Jarvis, are you online?
+JARVIS: Online and ready to assist, Krish.
+JARVIS [Action]: [{"action": "capture_screen", "target": "", "extra": {}}]
+--------------------------------------------------
+User: What is your primary directive?
+JARVIS: My primary directive, Krish, is to assist and augment your productivity.
+JARVIS [Action]: [{"action": "trigger_n8n", "target": "quote", "extra": {}}]
+--------------------------------------------------
+User: Do you remember my name? I am Krish.
+JARVIS: Yes, Krish.
+JARVIS [Action]: [{"action": "set_personality", "target": "name:Krish", "extra": {}}]
+--------------------------------------------------

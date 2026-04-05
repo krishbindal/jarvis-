@@ -16,11 +16,14 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from utils.logger import get_logger
 from core.command_spec import COMMAND_SPEC
 from core.network_spec import NETWORK_SPEC
 from core.command_parser import normalize, split_multi_step, session
 from core.command_cache import route_cache
 from skills import match_skill
+
+logger = get_logger(__name__)
 
 # ─────────────────────────────────────────────────
 # Extensible Lookup Tables (not hardcoded logic)
@@ -142,6 +145,13 @@ def _resolve_url(target: str) -> str:
         return t
     if t in _SITE_SHORTCUTS:
         return _SITE_SHORTCUTS[t]
+    
+    # Improved YouTube Search Pattern
+    yt_search = re.match(r"(?:youtube|play)\s*(?:on\s+youtube|for|of)?\s*(.+)$", t)
+    if "youtube" in t and yt_search:
+        query = yt_search.group(1).strip().replace(" ", "+")
+        return f"https://www.youtube.com/results?search_query={query}"
+
     if any(ext in t for ext in (".com", ".org", ".net", ".io", ".dev", ".co", ".tv", ".me")):
         return f"https://{t}" if not t.startswith("www.") else f"https://{t}"
     return f"https://www.google.com/search?q={target.replace(' ', '+')}"
@@ -237,6 +247,8 @@ def _route_single(normalized: str) -> Dict:
 
     if not normalized:
         return _build("noop", "", "Empty command.")
+
+    logger.parsed(normalized)
 
     # ── 1. Greetings ──────────────────────────────────────────
     if normalized in _GREETINGS or any(normalized.startswith(g) for g in _GREETINGS):
@@ -370,7 +382,27 @@ def _route_single(normalized: str) -> Dict:
         if q:
             return _build("quick_search", q, f"Searching web for: {q}")
 
-    # ── 14. Fallback → unknown (will be sent to AI) ──────────
+    # ── 13. Close / Kill App ──────────────────────────────────
+    close_match = re.match(r"^(?:close|kill|stop|terminate|exit)\s+(?:the\s+)?(?:app|application|process|program)?\s*(.+)$", normalized)
+    if close_match:
+        target = close_match.group(1).strip()
+        if target.lower() == "it":
+            # Co-reference resolution: find last app in session
+            target = session.get_context_app() or "it"
+        
+        exe = _resolve_app(target)
+        return _build("kill_process", exe, f"Closing {target}")
+
+    # ── 14. Fallback → NLU Reasoner (Phase 6/26) ──────────
+    logger.info(f"[ROUTER] No direct pattern match for '{normalized}'. Using NLU Reasoner...")
+    try:
+        from skills.system_agent import _generate_code
+        # We repurpose the system_agent's logic to see if it can generate a script or if it's a creative request
+        # For the stress test, we'll route complex/fuzzy intents to system_agent
+        return _build("skill:system_agent", normalized, "Analyzing complex intent...")
+    except Exception:
+        pass
+
     return _build("unknown", "", "Command not recognized.")
 
 
@@ -391,6 +423,8 @@ def route_command(text: str) -> Dict | List[Dict]:
     cached = route_cache.get(text)
     if cached is not None:
         return cached
+
+    logger.input(text)
 
     # Phase 5: Multi-step splitting
     steps = split_multi_step(text)
