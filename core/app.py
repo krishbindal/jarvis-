@@ -51,6 +51,8 @@ from core.mcp_hub import get_mcp_hub
 from core.context_state import ContextState
 from brain.agent_planner import plan_steps
 from executor import agent_tools
+from automation.planner import build_automation_plan
+from automation.executor import execute_automation_plan
 
 logger = get_logger(__name__)
 
@@ -287,6 +289,13 @@ class JarvisApp:
             # Signal overlay: thinking
             self._events.emit("overlay_state", {"state": "thinking", "text": text[:40]})
 
+            # ── [AUTOMATION] Universal planner/executor ────
+            automation_outcome = self._run_automation_flow(raw_text)
+            if automation_outcome:
+                final_result, interaction_steps = automation_outcome
+                interaction_done = True
+                return
+
             # ── [PARSED] ─────────────────────────────────────
             route_result = route_command(text)
             logger.info("[PARSED] result=%s", _summary(route_result))
@@ -413,6 +422,29 @@ class JarvisApp:
                     learn_from_interaction(user_text, ai_msg)
             except Exception:
                 pass
+
+    def _run_automation_flow(self, raw_text: str) -> tuple[dict, list] | None:
+        """LLM-driven universal automation pipeline (intent → plan → execute)."""
+        plan = build_automation_plan(raw_text, self._context.snapshot())
+        if not plan.is_actionable():
+            return None
+
+        logger.info("[AUTOMATION] %s", plan.summary())
+        result = execute_automation_plan(plan, self._context, self._events, self._interactions)
+        payload = {
+            "type": "automation",
+            "goal": plan.goal or raw_text,
+            "steps": result.get("steps", []),
+            "status": result.get("status"),
+            "message": result.get("message"),
+            "source": plan.source,
+        }
+        self._events.emit("command_result", payload)
+        try:
+            self._interactions.finish(payload.get("message", "Done."))
+        except Exception:
+            pass
+        return payload, result.get("steps", [])
 
     # ─── Multi-Step Execution (Phase 5) ──────────────────────
 
@@ -688,6 +720,8 @@ class JarvisApp:
             return agent_tools.get_active_app()
         if tool == "open_url":
             return execute_action("open_dynamic", arg, {"resolved_type": "url"})
+        if tool == "scroll":
+            return agent_tools.scroll(arg or -800)
         return {"success": False, "status": "error", "message": f"Unknown tool {tool}"}
 
     def _announce_agent_step(self, tool: str, arg: str) -> None:
