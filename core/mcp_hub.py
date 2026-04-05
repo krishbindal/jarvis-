@@ -5,12 +5,42 @@ import threading
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+try:
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    _MCP_AVAILABLE = True
+    _MCP_ERROR = None
+except Exception as exc:  # noqa: BLE001
+    ClientSession = None
+    StdioServerParameters = None
+    stdio_client = None
+    _MCP_AVAILABLE = False
+    _MCP_ERROR = exc
 
 from utils.logger import get_logger
 
 logger = get_logger("jarvis.mcp")
+
+
+class NoopMCPHub:
+    """Fallback hub when MCP dependencies are missing."""
+
+    def __init__(self, reason: Exception | None = None):
+        self._tools: Dict[str, Any] = {}
+        self._reason = reason
+
+    def start(self):
+        logger.warning("[MCP] MCP dependencies unavailable: %s", self._reason)
+        return False
+
+    def stop(self):
+        return True
+
+    def get_available_tools(self) -> Dict[str, Any]:
+        return {}
+
+    def call_tool(self, tool_id: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        return {"success": False, "error": f"MCP unavailable: {self._reason}"}
 
 class MCPHub:
     """
@@ -32,6 +62,9 @@ class MCPHub:
 
     def start(self):
         """Initialize the hub and start the background event loop."""
+        if not _MCP_AVAILABLE:
+            logger.warning("[MCP] Skipping hub start: dependency missing (%s)", _MCP_ERROR)
+            return False
         if not self._thread.is_alive():
             self._thread.start()
         
@@ -143,5 +176,8 @@ _hub: Optional[MCPHub] = None
 def get_mcp_hub() -> MCPHub:
     global _hub
     if _hub is None:
+        if not _MCP_AVAILABLE:
+            _hub = NoopMCPHub(_MCP_ERROR)
+            return _hub
         _hub = MCPHub()
     return _hub

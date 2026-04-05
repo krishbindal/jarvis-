@@ -1,11 +1,20 @@
 import psutil
-import win32gui
-import win32process
 from typing import Dict, Any, Optional
+
+try:
+    import win32gui
+    import win32process
+    _WIN32_AVAILABLE = True
+except Exception:  # noqa: BLE001
+    win32gui = None
+    win32process = None
+    _WIN32_AVAILABLE = False
 
 def get_active_window_title() -> str:
     """Return the title of the current foreground window."""
     try:
+        if not _WIN32_AVAILABLE:
+            return "Unknown"
         hwnd = win32gui.GetForegroundWindow()
         return win32gui.GetWindowText(hwnd) or "System"
     except Exception:
@@ -31,6 +40,8 @@ def get_system_stats() -> Dict[str, Any]:
 def get_active_process_name() -> str:
     """Return the name of the active process (e.g., 'chrome.exe')."""
     try:
+        if not _WIN32_AVAILABLE:
+            return "Unknown"
         hwnd = win32gui.GetForegroundWindow()
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
         process = psutil.Process(pid)

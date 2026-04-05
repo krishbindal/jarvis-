@@ -2,6 +2,13 @@
 
 Local, offline-first desktop assistant scaffolded for Windows using Python, PySide6, and Ollama (later phases). This repository currently delivers Phase 1: activation trigger, cinematic startup, and a styled UI shell.
 
+## Universal Desktop Automation
+- Natural-language → structured intent planner that emits `{goal, steps[]}` without hardcoded app/site flows.
+- Task planner maps steps to generic actions (`open_app`, `open_url`, `search`, `click`, `type`, `scroll`, `download`) and reuses current app/browser context.
+- Universal executor drives pyautogui/Playwright to click/type/scroll, opens URLs with existing browsers, and handles downloads with safety checks.
+- Continuous context tracking keeps follow-up commands in the same surface (e.g., “open chrome” → “search python tutorial” stays in Chrome).
+- Step-level feedback logs every action and stops on failures with a concise status message.
+
 ## Folder Structure
 - `core/` – application orchestration and startup sequence
 - `triggers/` – activation inputs (double-clap detector)
