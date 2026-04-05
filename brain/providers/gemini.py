@@ -1,5 +1,5 @@
 from typing import Dict, Any
-from google import genai
+import google.generativeai as genai
 from utils.logger import get_logger
 from config import GEMINI_API_KEY
 from brain.providers.base import AIProvider, _safe_json_extract, _validate_steps

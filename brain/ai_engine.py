@@ -8,7 +8,7 @@ import os
 from typing import Any, Dict, Iterable
 
 import requests
-from google import genai
+import google.generativeai as genai
 from groq import Groq
 
 from utils.logger import get_logger
@@ -112,7 +112,7 @@ def describe_screen(prompt: str = "What is on the screen?") -> str:
         return "I need a Gemini API key to see the screen without lagging your PC."
 
     try:
-        from google.genai import types
+        from google.generativeai import types
         logger.info("[VISION] Sending screen to Gemini (Cloud)...")
         client = genai.Client(api_key=GEMINI_API_KEY)
         

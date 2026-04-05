@@ -1,5 +1,10 @@
 """Smoke test for all Phase 20-29 modules."""
+import os
 import sys
+import unittest
+
+if os.environ.get("RUN_JARVIS_DIAGNOSTICS") != "1":
+    raise unittest.SkipTest("Manual diagnostics suite; set RUN_JARVIS_DIAGNOSTICS=1 to run.")
 
 tests = []
 

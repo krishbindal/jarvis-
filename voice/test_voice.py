@@ -1,6 +1,13 @@
+import os
+import json
+import unittest
+
+# Manual microphone recognition test; skip during automated runs
+if os.environ.get("RUN_JARVIS_AUDIO_TESTS") != "1":
+    raise unittest.SkipTest("Manual voice capture test (requires Vosk model and microphone).")
+
 from vosk import Model, KaldiRecognizer
 import sounddevice as sd
-import json
 
 # 🔥 CONFIG
 
