@@ -296,10 +296,12 @@ class JarvisApp:
 
             # ── Chat (greeting) — speak immediately ──────────
             if action == "chat":
+                extra = result.get("extra", {})
                 exec_result = execute_action(action, result.get("target", ""))
                 result["exec_result"] = exec_result
                 result["message"] = exec_result.get("message", "")
                 logger.info("[ACTION] chat → '%s'", exec_result.get("message", ""))
+                self._context.update_after_action(action, result.get("target", ""), extra, exec_result)
                 self._events.emit("command_result", result)
                 final_result = result
                 self._interactions.finish(result.get("message", "Done."))
@@ -400,6 +402,7 @@ class JarvisApp:
                 logger.info("[ACTION] Step %d: chat", i + 1)
                 exec_result = execute_action(action, target)
                 step_result["exec_result"] = exec_result
+                self._context.update_after_action(action, target, extra, exec_result)
                 logger.info("[EXECUTION] Step %d: chat completed", i + 1)
             elif action not in ("noop",):
                 # ── [ACTION] Execute Step ────────────────────
@@ -553,7 +556,9 @@ class JarvisApp:
             pending_steps: List[dict] = []
             planner_msg = ""
             feedback = ""
-            max_steps = 8
+            max_steps = 3
+            last_tool = None
+            last_input = None
 
             for _ in range(max_steps):
                 if not pending_steps:
@@ -574,8 +579,19 @@ class JarvisApp:
                 if reason:
                     self._events.emit("command_progress", {"stage": "agent", "text": reason})
                 self._announce_agent_step(tool, step.get("input", ""))
-                result = self._execute_tool_step(tool, step.get("input", ""))
-                self._context.update_after_action(tool, step.get("input", ""), {}, result)
+                input_arg = step.get("input", "")
+
+                if last_tool and tool == last_tool and input_arg == (last_input or ""):
+                    final_message = planner_msg or f"Stopping: repeated action {tool}."
+                    result_payload = {"type": "agent_loop", "steps": executed_steps, "message": final_message}
+                    self._events.emit("command_result", result_payload)
+                    self._interactions.finish(final_message)
+                    return result_payload, executed_steps
+
+                before_ctx = self._context.snapshot()
+                result = self._execute_tool_step(tool, input_arg)
+                self._context.update_after_action(tool, input_arg, {}, result)
+                after_ctx = self._context.snapshot()
                 executed_steps.append({"step": step, "result": result})
 
                 status_line = result.get("message") or result.get("status") or ""
@@ -583,6 +599,16 @@ class JarvisApp:
                     self._events.emit("command_progress", {"stage": "agent_step", "text": status_line})
 
                 pending_steps.clear()
+
+                if not self._has_progress(before_ctx, after_ctx, result):
+                    final_message = planner_msg or "Stopping: no progress detected."
+                    result_payload = {"type": "agent_loop", "steps": executed_steps, "message": final_message}
+                    self._events.emit("command_result", result_payload)
+                    self._interactions.finish(final_message)
+                    return result_payload, executed_steps
+
+                last_tool = tool
+                last_input = input_arg
 
                 if not result.get("success", True):
                     feedback = f"Step {tool} failed: {status_line or 'no message'}. Continue from current app/url."
@@ -629,6 +655,17 @@ class JarvisApp:
         except Exception:
             pass
         self._interactions.narrate_action(tool, arg)
+
+    @staticmethod
+    def _has_progress(before: dict, after: dict, result: dict) -> bool:
+        """Detect whether context or output moved forward to prevent loops."""
+        keys = ("current_app", "current_url", "last_action", "last_result_status", "last_result_message", "task_in_progress")
+        for key in keys:
+            if before.get(key) != after.get(key):
+                return True
+        if result.get("success") and result.get("output"):
+            return True
+        return False
 
     # ─── Proactive Intelligence (Phase 19) ────────────────────
 
