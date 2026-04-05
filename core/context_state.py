@@ -18,15 +18,16 @@ class ContextState:
             "current_url": None,
             "last_action": None,
             "last_user_intent": None,
+            "last_result_message": None,
+            "last_result_status": None,
+            "task_in_progress": False,
         }
-        self.task_in_progress = False
 
     def snapshot(self) -> Dict[str, Optional[str]]:
         with self._lock:
             snap = dict(self._state)
         snap["active_window"] = get_active_window_title()
         snap["active_process"] = get_active_process_name()
-        snap["task_in_progress"] = self.task_in_progress
         return snap
 
     def set_intent(self, intent: str) -> None:
@@ -36,6 +37,9 @@ class ContextState:
     def update_after_action(self, action: str, target: str, extra: Optional[dict], exec_result: Optional[dict]) -> None:
         with self._lock:
             self._state["last_action"] = action
+            if exec_result:
+                self._state["last_result_message"] = exec_result.get("message")
+                self._state["last_result_status"] = exec_result.get("status")
             if action in ("open_app", "open_dynamic", "open_url"):
                 app = (extra or {}).get("app") or target
                 self._state["current_app"] = app
@@ -49,7 +53,8 @@ class ContextState:
                 self._state["task_in_progress"] = False
 
     def set_task(self, value: bool) -> None:
-        self.task_in_progress = value
+        with self._lock:
+            self._state["task_in_progress"] = value
 
     @property
     def current_app(self) -> Optional[str]:
@@ -64,3 +69,18 @@ class ContextState:
     def has_active_context(self) -> bool:
         with self._lock:
             return bool(self._state.get("current_app") or self._state.get("current_url"))
+
+    @property
+    def task_in_progress(self) -> bool:
+        with self._lock:
+            return bool(self._state.get("task_in_progress"))
+
+    @property
+    def last_action(self) -> Optional[str]:
+        with self._lock:
+            return self._state.get("last_action")
+
+    @property
+    def last_user_intent(self) -> Optional[str]:
+        with self._lock:
+            return self._state.get("last_user_intent")
