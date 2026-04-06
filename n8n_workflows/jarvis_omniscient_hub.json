@@ -24,7 +24,7 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "proactive-trigger",
+        "path": "jarvis-intel-a1b2c3d4",
         "options": {}
       },
       "id": "manual-webhook",
