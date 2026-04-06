@@ -59,11 +59,19 @@ def test_config():
     try:
         import config
         record("Config", ".env loads correctly", True)
-        record("Config", "GEMINI_API_KEY present",  bool(config.GEMINI_API_KEY),  config.GEMINI_API_KEY[:12] + "…")
-        record("Config", "GROQ_API_KEY present",    bool(config.GROQ_API_KEY),    config.GROQ_API_KEY[:12]  + "…")
+        gemini_set = bool(config.GEMINI_API_KEY)
+        groq_set = bool(config.GROQ_API_KEY)
+        n8n_set = (
+            bool(config.N8N_WEBHOOK_URL)
+            and "localhost" not in config.N8N_WEBHOOK_URL
+            and "your-n8n" not in config.N8N_WEBHOOK_URL
+        )
+
+        record("Config", "GEMINI_API_KEY present", gemini_set, "set" if gemini_set else "not set")
+        record("Config", "GROQ_API_KEY present", groq_set, "set" if groq_set else "not set")
         record("Config", "N8N_WEBHOOK_URL present",
-               "localhost" not in config.N8N_WEBHOOK_URL and "your-n8n" not in config.N8N_WEBHOOK_URL,
-               config.N8N_WEBHOOK_URL)
+               n8n_set,
+               "set" if n8n_set else "not set")
         record("Config", "MODEL_NAME set",          bool(config.MODEL_NAME), config.MODEL_NAME)
     except Exception as exc:
         record("Config", "Config import", False, str(exc))
@@ -368,7 +376,9 @@ def print_report():
                 print(f"      → {r['detail']}")
 
     # Save JSON report
-    report_path = "jarvis_test_report.json"
+    report_dir = Path(__file__).resolve().parent / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / "jarvis_test_report.json"
     with open(report_path, "w") as f:
         json.dump({
             "timestamp": datetime.now().isoformat(),
