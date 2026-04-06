@@ -37,3 +37,6 @@ Desktop.ini
 
 # n8n Community Library (Templates with potential secrets)
 n8n_workflows/Community_Library/
+
+# Generated diagnostics reports (may include environment-derived details)
+diagnostics/reports/*.json
