@@ -1,7 +1,7 @@
 """
 JARVIS-X Dexter Copilot — Full Automation Test Suite
 =====================================================
-Tests: Responsiveness · AI Latency · Command Routing · Execution · Memory · Behaviour
+Tests: Responsiveness - AI Latency - Command Routing - Execution - Memory - Behaviour
 """
 from __future__ import annotations
 
@@ -17,7 +17,8 @@ from datetime import datetime
 from pathlib import Path
 
 # Bootstrap path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if root not in sys.path: sys.path.append(root)
 
 # ──────────────────────────────────────────────────
 # Colour helpers (Windows-safe)
@@ -40,22 +41,22 @@ except ImportError:
 RESULTS: list[dict] = []
 
 def record(category: str, test: str, passed: bool, detail: str = "", latency_ms: float | None = None):
-    icon = f"{GREEN}✓{RESET}" if passed else f"{RED}✗{RESET}"
+    icon = f"{GREEN}[PASS]{RESET}" if passed else f"{RED}[FAIL]{RESET}"
     lat  = f"  [{latency_ms:.0f}ms]" if latency_ms is not None else ""
     print(f"  {icon}  {test}{lat}")
     if detail:
-        print(f"      {CYAN}↳ {detail}{RESET}")
+        print(f"      {CYAN}=> {detail}{RESET}")
     RESULTS.append({"category": category, "test": test, "passed": passed,
                     "detail": detail, "latency_ms": latency_ms})
 
 def section(title: str):
-    print(f"\n{BOLD}{CYAN}━━━ {title} ━━━{RESET}")
+    print(f"\n{BOLD}{CYAN}=== {title} ==={RESET}")
 
 # ──────────────────────────────────────────────────
 # TEST 1: Config & .env loading
 # ──────────────────────────────────────────────────
 def test_config():
-    section("PHASE 1 · Config & Environment")
+    section("PHASE 1 - Config & Environment")
     try:
         import config
         record("Config", ".env loads correctly", True)
@@ -72,7 +73,7 @@ def test_config():
 # TEST 2: Ollama service ping
 # ──────────────────────────────────────────────────
 def test_ollama():
-    section("PHASE 2 · Ollama Local AI")
+    section("PHASE 2 - Ollama Local AI")
     t0 = time.monotonic()
     try:
         resp = requests.get("http://localhost:11434/api/tags", timeout=5)
@@ -90,7 +91,7 @@ def test_ollama():
 # TEST 3: AI engine latency & response quality
 # ──────────────────────────────────────────────────
 def test_ai_engine():
-    section("PHASE 3 · AI Engine Responsiveness")
+    section("PHASE 3 - AI Engine Responsiveness")
     try:
         from brain.ai_engine import interpret_command
         prompts = [
@@ -118,7 +119,7 @@ def test_ai_engine():
 # TEST 4: Command router accuracy
 # ──────────────────────────────────────────────────
 def test_router():
-    section("PHASE 4 · Command Router Accuracy")
+    section("PHASE 4 - Command Router Accuracy")
     try:
         from core.command_router import route_command
         cases = [
@@ -146,7 +147,7 @@ def test_router():
 # TEST 5: Executor — system commands
 # ──────────────────────────────────────────────────
 def test_executor():
-    section("PHASE 5 · System Executor")
+    section("PHASE 5 - System Executor")
     try:
         from executor.system_executor import list_files, file_info, open_app
 
@@ -181,7 +182,7 @@ def test_executor():
 # TEST 6: SQLite memory
 # ──────────────────────────────────────────────────
 def test_memory():
-    section("PHASE 6 · Neural Memory (SQLite)")
+    section("PHASE 6 - Neural Memory (SQLite)")
     try:
         from memory.memory_store import save_interaction, get_recent_history, get_relevant_context
 
@@ -215,7 +216,7 @@ def test_memory():
 # TEST 7: EventBus integration
 # ──────────────────────────────────────────────────
 def test_eventbus():
-    section("PHASE 7 · EventBus (Thread Safety)")
+    section("PHASE 7 - EventBus (Thread Safety)")
     try:
         from utils import EventBus
         bus = EventBus()
@@ -241,7 +242,7 @@ def test_eventbus():
 # TEST 8: Vosk model structure
 # ──────────────────────────────────────────────────
 def test_vosk():
-    section("PHASE 8 · Vosk Voice Model")
+    section("PHASE 8 - Vosk Voice Model")
     model_path = Path("voice/model")
     record("Voice", "voice/model directory exists", model_path.exists())
     for sub in ["am", "conf", "graph"]:
@@ -253,7 +254,7 @@ def test_vosk():
 # TEST 9: Microphone presence
 # ──────────────────────────────────────────────────
 def test_microphone():
-    section("PHASE 9 · Audio Hardware")
+    section("PHASE 9 - Audio Hardware")
     try:
         import sounddevice as sd
         devs = sd.query_devices()
@@ -267,7 +268,7 @@ def test_microphone():
 # TEST 10: n8n webhook reachability
 # ──────────────────────────────────────────────────
 def test_n8n():
-    section("PHASE 10 · n8n Workflow Integration")
+    section("PHASE 10 - n8n Workflow Integration")
     try:
         import config
         url = config.N8N_WEBHOOK_URL
@@ -288,7 +289,7 @@ def test_n8n():
 # TEST 11: Asset files
 # ──────────────────────────────────────────────────
 def test_assets():
-    section("PHASE 11 · Asset Integrity")
+    section("PHASE 11 - Asset Integrity")
     assets = [
         ("assets/sounds/startup.mp3",   "Startup sound"),
         ("assets/memory",               "Vision memory dir"),
@@ -303,7 +304,7 @@ def test_assets():
 # TEST 12: End-to-end route→execute simulation
 # ──────────────────────────────────────────────────
 def test_e2e():
-    section("PHASE 12 · End-to-End Command Simulation (No UI)")
+    section("PHASE 12 - End-to-End Command Simulation (No UI)")
     try:
         from core.command_router import route_command
         from core.action_registry import execute_action
@@ -348,9 +349,9 @@ def print_report():
                     if r["category"] == "AI" and r["latency_ms"] is not None]
     avg_ai = sum(ai_latencies) / len(ai_latencies) if ai_latencies else 0
 
-    print(f"\n{BOLD}{'═'*55}{RESET}")
+    print(f"\n{BOLD}{'='*55}{RESET}")
     print(f"{BOLD}  JARVIS-X DEXTER COPILOT — SYSTEM REPORT CARD{RESET}")
-    print(f"{'═'*55}")
+    print(f"{'='*55}")
     print(f"  Tests passed   : {GREEN}{passed}{RESET} / {total}")
     print(f"  Tests failed   : {RED}{failed}{RESET}")
     print(f"  Score          : {colour}{pct:.1f}%{RESET}")
@@ -378,14 +379,18 @@ def print_report():
             "total": total, "passed": passed, "failed": failed,
             "results": RESULTS
         }, f, indent=2)
-    print(f"\n  📄 Full report saved → {report_path}")
-    print(f"{'═'*55}\n")
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass
+    print(f"\n  Full report saved -> {report_path}")
+    print(f"{'='*55}\n")
 
 # ──────────────────────────────────────────────────
 # MAIN
 # ──────────────────────────────────────────────────
 if __name__ == "__main__":
-    print(f"\n{BOLD}{CYAN}🤖 JARVIS-X AUTOMATION TEST SUITE{RESET}")
+    print(f"\n{BOLD}{CYAN}JARVIS-X AUTOMATION TEST SUITE{RESET}")
     print(f"{CYAN}   {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{RESET}\n")
 
     test_config()

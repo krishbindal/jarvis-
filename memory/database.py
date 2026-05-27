@@ -4,15 +4,26 @@ import sqlite3
 from datetime import datetime, timedelta
 
 class MemoryDB:
+    # Caps to prevent unbounded growth
+    MAX_INTERACTIONS = 5000
+    MAX_OBSERVATIONS = 10000
+    PRUNE_DAYS = 30  # Delete usage_stats older than this
+
     def __init__(self, db_path="memory/jarvis.db"):
         self.db_path = db_path
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_db()
+        self.prune()  # Cleanup on every startup
 
     def _init_db(self):
         """Setup SQLite tables."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
+
+            # Performance: WAL mode for better concurrent read/write from background threads
+            cursor.execute("PRAGMA journal_mode=WAL")
+            # Reclaim disk space from deleted rows
+            cursor.execute("PRAGMA auto_vacuum=INCREMENTAL")
             
             # Interactions Table
             cursor.execute('''
@@ -89,6 +100,47 @@ class MemoryDB:
             
             conn.commit()
 
+    def prune(self):
+        """Remove old rows to prevent unbounded DB growth."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # Cap interactions table
+                cursor.execute("SELECT COUNT(*) FROM interactions")
+                count = cursor.fetchone()[0]
+                if count > self.MAX_INTERACTIONS:
+                    excess = count - self.MAX_INTERACTIONS
+                    cursor.execute(
+                        "DELETE FROM interactions WHERE id IN "
+                        "(SELECT id FROM interactions ORDER BY id ASC LIMIT ?)",
+                        (excess,),
+                    )
+
+                # Cap observations table
+                cursor.execute("SELECT COUNT(*) FROM observations")
+                count = cursor.fetchone()[0]
+                if count > self.MAX_OBSERVATIONS:
+                    excess = count - self.MAX_OBSERVATIONS
+                    cursor.execute(
+                        "DELETE FROM observations WHERE id IN "
+                        "(SELECT id FROM observations ORDER BY id ASC LIMIT ?)",
+                        (excess,),
+                    )
+
+                # Delete old usage_stats
+                cutoff = (datetime.now() - timedelta(days=self.PRUNE_DAYS)).isoformat()
+                cursor.execute(
+                    "DELETE FROM usage_stats WHERE timestamp < ?", (cutoff,)
+                )
+
+                conn.commit()
+
+                # Reclaim freed disk space
+                cursor.execute("PRAGMA incremental_vacuum")
+        except Exception:
+            pass  # Never crash the app over pruning
+
     def add_interaction(self, role, content, context=None, embedding=None):
         """Log a user/ai interaction with optional vector embedding."""
         with sqlite3.connect(self.db_path) as conn:
@@ -110,14 +162,26 @@ class MemoryDB:
             rows = cursor.fetchall()[::-1]
             return [{"role": row["role"], "content": row["content"], "context": row["context"]} for row in rows]
 
-    def get_all_embeddings(self):
-        """Fetch all stored embeddings and their content for vector search."""
+    def get_all_embeddings(self, limit=500):
+        """Fetch recent stored embeddings for vector search (capped to prevent RAM bloat)."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT role, content, embedding FROM interactions WHERE embedding IS NOT NULL")
+            cursor.execute(
+                "SELECT role, content, embedding FROM interactions "
+                "WHERE embedding IS NOT NULL ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
             rows = cursor.fetchall()
             return [{"role": row["role"], "content": row["content"], "embedding": row["embedding"]} for row in rows]
+
+    def get_preference(self, key):
+        """Retrieve a learned preference by key."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM knowledge WHERE key = ?", (key,))
+            res = cursor.fetchone()
+            return res[0] if res else None
 
     def upsert_knowledge(self, key, value, category='general'):
         """Store or update a learned preference/fact."""

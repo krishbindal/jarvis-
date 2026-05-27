@@ -3,12 +3,13 @@ from groq import Groq
 from utils.logger import get_logger
 from config import GROQ_API_KEY
 from brain.providers.base import AIProvider, _safe_json_extract, _validate_steps
+from brain.provider_config import PRIMARY_MODEL, FALLBACK_MODEL, FAST_MODEL, COMMAND_TEMP, QUERY_TEMP, NORMAL_TIMEOUT
 
 logger = get_logger(__name__)
 
 class GroqProvider(AIProvider):
     def __init__(self):
-        self.models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+        self.models = [PRIMARY_MODEL, FALLBACK_MODEL]
 
     @property
     def name(self) -> str:
@@ -21,16 +22,17 @@ class GroqProvider(AIProvider):
         if not self.is_available():
             raise ValueError(f"Provider {self.name} is not available (Missing API Key).")
 
-        full_prompt = f"{system_prompt}\n{context}\n\nUser: {user_input}\nAssistant:"
-        
         for current_model in self.models:
             try:
                 logger.info(f"[AI] Attempting {self.name} ({current_model})...")
-                client = Groq(api_key=GROQ_API_KEY, timeout=8.0)
+                client = Groq(api_key=GROQ_API_KEY, timeout=NORMAL_TIMEOUT)
                 completion = client.chat.completions.create(
                     model=current_model,
-                    messages=[{"role": "user", "content": full_prompt}],
-                    temperature=0.1,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"{context}\n\nUser: {user_input}"},
+                    ],
+                    temperature=COMMAND_TEMP,
                 )
                 output = completion.choices[0].message.content
                 parsed = _safe_json_extract(output)
@@ -54,11 +56,13 @@ class GroqProvider(AIProvider):
         if not self.is_available():
             raise ValueError(f"Provider {self.name} is not available.")
             
-        full_prompt = f"{system_msg}\n\nTask: {prompt}\n\nResponse:"
-        client = Groq(api_key=GROQ_API_KEY)
+        client = Groq(api_key=GROQ_API_KEY, timeout=NORMAL_TIMEOUT)
         completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": full_prompt}],
-            temperature=0.3,
+            model=PRIMARY_MODEL,
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=QUERY_TEMP,
         )
         return completion.choices[0].message.content.strip()

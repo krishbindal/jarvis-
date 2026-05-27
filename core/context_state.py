@@ -85,3 +85,16 @@ class ContextState:
     def last_user_intent(self) -> Optional[str]:
         with self._lock:
             return self._state.get("last_user_intent")
+
+    def clear(self) -> None:
+        """Reset all context state to defaults."""
+        with self._lock:
+            self._state = {
+                "current_app": None,
+                "current_url": None,
+                "last_action": None,
+                "last_user_intent": None,
+                "last_result_message": None,
+                "last_result_status": None,
+                "task_in_progress": False,
+            }

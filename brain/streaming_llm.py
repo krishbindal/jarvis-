@@ -80,11 +80,13 @@ def stream_response(user_prompt: str, system_prompt: Optional[str] = None) -> Ge
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": user_prompt})
 
-    # Try local first
+    # Try local first — track whether it yielded anything
+    yielded = False
     for token in _stream_ollama(messages):
+        yielded = True
         yield token
 
-    # If nothing was yielded, fall back to Groq
-    if GROQ_API_KEY:
+    # Only fall back to Groq if Ollama yielded nothing
+    if not yielded and GROQ_API_KEY:
         for token in _stream_groq(messages):
             yield token

@@ -18,6 +18,7 @@ CLAP_COOLDOWN_S = 2.5
 CLAP_CALIBRATION_S = 2.0
 
 # Voice
+WAKE_WORD = "jarvis"
 VOICE_MODEL_PATH = os.getenv("VOICE_MODEL_PATH", "voice/model")
 
 # AI Models

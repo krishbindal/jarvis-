@@ -16,6 +16,7 @@ import threading
 from collections import deque
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
+import os
 
 from core.context_state import ContextState
 from memory.memory_store import (
@@ -54,12 +55,17 @@ class AutonomyEngine:
         self._cooldown: Dict[str, float] = {}
         self._last_command: Optional[str] = None
         self._interval = 6  # seconds; keep light for performance
+        self._last_heartbeat: float = 0.0  # throttle system heartbeats
+        self._heartbeat_interval = 300  # 5 minutes between heartbeats
+        self._command_count = 0
+        self._last_snapshot_ts: float = 0.0
+        self._snapshot_interval = 180  # Photographic memory: every 3 minutes
 
         self._bus.subscribe("command_received", self._on_command)
         self._bus.subscribe("interrupt_autonomy", self._on_interrupt)
         self._bus.subscribe("system_shutdown", lambda *_: self.stop())
 
-    # ─── Lifecycle ───────────────────────────────────────────
+    # --─ Lifecycle ------------------------------------------─
 
     def start(self) -> None:
         if self._running:
@@ -82,7 +88,7 @@ class AutonomyEngine:
         self._interrupted = True
         logger.info("[AUTONOMY] Interruption requested; pausing autonomous actions.")
 
-    # ─── Observing ───────────────────────────────────────────
+    # --─ Observing ------------------------------------------─
 
     def _loop(self) -> None:
         time.sleep(2.0)  # allow startup to finish
@@ -91,6 +97,7 @@ class AutonomyEngine:
                 self._observe_active_app()
                 self._detect_pattern()
                 self._check_schedules()
+                self._photographic_snapshot()
             except Exception as exc:  # noqa: BLE001
                 logger.error("[AUTONOMY] Loop error: %s", exc)
             time.sleep(self._interval)
@@ -105,10 +112,13 @@ class AutonomyEngine:
             self._sequence.append(app)
             self._last_app = app
 
-        # Periodically capture coarse context to feed the AI brain/memory
-        stats = get_system_stats()
-        if stats:
-            log_observation("system", "heartbeat", stats)
+        # Throttled heartbeat: log system stats only every 5 minutes, not every 6s
+        now = time.time()
+        if now - self._last_heartbeat >= self._heartbeat_interval:
+            stats = get_system_stats()
+            if stats:
+                log_observation("system", "heartbeat", stats)
+            self._last_heartbeat = now
 
     def _on_command(self, payload: dict) -> None:
         text = (payload or {}).get("text", "")
@@ -119,8 +129,13 @@ class AutonomyEngine:
         self._last_command = text.lower().strip()
         # Commands influence pattern memory too
         self._sequence.append(f"cmd:{source}")
+        
+        # Self-learning loop: Trigger a background self-reflection cycle every 10 commands
+        self._command_count += 1
+        if self._command_count % 10 == 0:
+            threading.Thread(target=self._run_reflection_bg, daemon=True, name="autonomy-reflection").start()
 
-    # ─── Pattern Detection & Suggestions ─────────────────────
+    # --─ Pattern Detection & Suggestions --------------------─
 
     def _detect_pattern(self) -> None:
         """Persist patterns and surface helpful suggestions."""
@@ -206,7 +221,7 @@ class AutonomyEngine:
         except Exception as exc:  # noqa: BLE001
             logger.error("[AUTONOMY] Failed to emit suggestion: %s", exc)
 
-    # ─── Scheduler & Auto Tasks ──────────────────────────────
+    # --─ Scheduler & Auto Tasks ------------------------------
 
     def _check_schedules(self) -> None:
         pending = due_tasks()
@@ -248,7 +263,7 @@ class AutonomyEngine:
                 })
                 mark_task_run(task_id, status="waiting_confirmation")
 
-    # ─── Execution Helpers ───────────────────────────────────
+    # --─ Execution Helpers ----------------------------------─
 
     def _execute_safe_command(self, command: str) -> bool:
         """Execute via action registry with self-healing fallbacks."""
@@ -275,6 +290,68 @@ class AutonomyEngine:
         except Exception as exc:  # noqa: BLE001
             logger.error("[AUTONOMY] Command execution failed: %s", exc)
             return False
+
+    def _run_reflection_bg(self) -> None:
+        """Execute the self-reflection cycles in a safe background thread."""
+        try:
+            from memory.personality import run_self_reflection
+            run_self_reflection()
+        except Exception as exc:
+            logger.debug("[AUTONOMY] Background reflection cycle failed: %s", exc)
+
+    # ── Photographic Memory (Multi-Modal) ─────────────────────
+
+    def _photographic_snapshot(self) -> None:
+        """Periodically capture and summarize the screen for visual recall."""
+        now = time.time()
+        if now - self._last_snapshot_ts < self._snapshot_interval:
+            return
+        # Don't snapshot while user is in a task (privacy + perf)
+        if self._context.task_in_progress:
+            return
+        self._last_snapshot_ts = now
+        threading.Thread(target=self._snapshot_worker, daemon=True, name="photo-memory").start()
+
+    def _snapshot_worker(self) -> None:
+        """Background worker: capture screen, summarize with vision, store in DB."""
+        img_path = "assets/memory/photo_memory.png"
+        try:
+            import mss
+            from PIL import Image
+
+            os.makedirs(os.path.dirname(img_path), exist_ok=True)
+            with mss.mss() as sct:
+                monitor = sct.monitors[0] if len(sct.monitors) > 2 else sct.monitors[1]
+                screenshot = sct.grab(monitor)
+                img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+                # Compress heavily — we only need a summary, not pixel-perfect
+                max_w = 800
+                if img.width > max_w:
+                    ratio = max_w / img.width
+                    img = img.resize((max_w, int(img.height * ratio)), Image.LANCZOS)
+                img.save(img_path, "PNG", optimize=True)
+
+            # Summarize with vision provider (Gemini Flash — fast + free)
+            try:
+                from brain.ai_engine import describe_screen
+                summary = describe_screen(
+                    "Describe what the user is currently doing on their computer in 2-3 sentences. "
+                    "Focus on the main application, any visible content, and the overall task."
+                )
+                if summary and "error" not in summary.lower():
+                    app = get_active_process_name()
+                    title = get_active_window_title()
+                    log_observation("visual_memory", summary[:500], {
+                        "app": app,
+                        "window": title,
+                        "img_path": img_path,
+                    })
+                    logger.info("[AUTONOMY] 📸 Photographic memory stored: %s", summary[:80])
+            except Exception as vis_exc:
+                logger.debug("[AUTONOMY] Vision summary failed: %s", vis_exc)
+
+        except Exception as exc:
+            logger.debug("[AUTONOMY] Photographic snapshot failed: %s", exc)
 
 
 _autonomy_engine: Optional[AutonomyEngine] = None

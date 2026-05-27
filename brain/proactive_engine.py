@@ -18,13 +18,25 @@ from brain.ai_engine import query_ai
 
 logger = get_logger("jarvis.proactive")
 
+
+def _user_address() -> str:
+    """Get the user's name for personalised messages."""
+    try:
+        from memory.personality import get_user_name
+        name = get_user_name()
+        return name if name else ""
+    except Exception:
+        return ""
+
+
 class ProactiveEngine:
-    def __init__(self, event_bus, interval_seconds: int = 60):
+    def __init__(self, event_bus, interval_seconds: int = 60, context_state=None):
         self._interval = interval_seconds
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._bus = event_bus
         self._last_context_hash = None
+        self._context_state = context_state
 
     def start(self):
         if self._running:
@@ -51,6 +63,11 @@ class ProactiveEngine:
             time.sleep(self._interval)
 
     def _analyze_context(self):
+        # Suppress while user is actively interacting
+        if self._context_state and self._context_state.task_in_progress:
+            logger.debug("[PROACTIVE] Suppressed: user task in progress.")
+            return
+
         stats = get_system_stats()
         vision_ctx = get_visual_context()
 
@@ -66,7 +83,8 @@ class ProactiveEngine:
         self._last_context_hash = ctx_hash
 
         prompt = f"""
-        You are Jarvis's proactive subsystem. Analyze the following user context:
+        You are Jarvis's proactive subsystem — sophisticated, concise, and Iron Man-calibre.
+        Analyze the following user context:
         {context}
         
         Is there anything critical the user needs to be warned about (like VERY high CPU >90%), 
@@ -80,16 +98,26 @@ class ProactiveEngine:
         """
         
         # We use a fast, low-temp query
-        response = query_ai(prompt, system_msg="You determine if proactive help is needed.").strip()
+        response = query_ai(
+            prompt,
+            system_msg="You are Jarvis — a sophisticated, capable AI companion. Determine if proactive help is needed. Be concise."
+        ).strip()
         
         if response and response.upper() != "NONE" and "NONE" not in response.upper():
+            # Final guard: don't interrupt if a task started while we were thinking
+            if self._context_state and self._context_state.task_in_progress:
+                logger.debug("[PROACTIVE] Suppressed after analysis: user task now in progress.")
+                return
+
+            name = _user_address()
+            address = f"{name}, " if name else ""
+
             if "AUTONOMOUS_ACTION:" in response.upper():
                 try:
                     action_text = response[response.upper().index("AUTONOMOUS_ACTION:") + len("AUTONOMOUS_ACTION:"):].strip()
                     if action_text:
                         logger.info(f"[PROACTIVE] Autonomous action triggered: {action_text}")
-                        # We emit an announcement notification and then emit the command
-                        self._bus.emit("proactive_notification", {"message": f"Sir, I am automatically running: {action_text}"})
+                        self._bus.emit("proactive_notification", {"message": f"{address}I'm automatically running: {action_text}"})
                         self._bus.emit("command_received", {"text": action_text, "source": "autonomous"})
                 except Exception as e:
                     logger.error(f"[PROACTIVE] Failed to parse action from: {response} - {e}")
@@ -99,10 +127,10 @@ class ProactiveEngine:
 
 _engine: Optional[ProactiveEngine] = None
 
-def get_proactive_engine(event_bus=None) -> ProactiveEngine:
+def get_proactive_engine(event_bus=None, context_state=None) -> ProactiveEngine:
     global _engine
     if _engine is None:
         if event_bus is None:
             raise ValueError("event_bus must be provided for initial setup of ProactiveEngine")
-        _engine = ProactiveEngine(event_bus)
+        _engine = ProactiveEngine(event_bus, context_state=context_state)
     return _engine

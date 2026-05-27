@@ -55,7 +55,7 @@ def main() -> None:
     # Ensure background start on future boots
     enable_autostart()
     
-    app = JarvisApp(auto_start=True)
+    app = JarvisApp(auto_start=False)
     app.run()
 
 

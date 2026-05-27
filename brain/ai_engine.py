@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import base64
 import os
+import time
 from typing import Any, Dict, Iterable
 
 import requests
-import google.generativeai as genai
+from google import genai
 from groq import Groq
 
 from utils.logger import get_logger
@@ -45,22 +46,28 @@ Available tools:
 * capture_screen: Get a fresh high-res look at the screen (if background context is out-of-date).
 * quick_search: Simple web research.
 * set_personality: If the user expresses a preference, interest, or something about themselves, use this action to "learn" it. Format: {"action": "set_personality", "target": "category:value"}.
+* self_reflect: Jarvis reflects on its own recent performance to learn new rules and grow more capable. Use this whenever the user asks you to "reflect on your performance", "learn from your recent actions", "run self-reflection", or similar. Format: {"action": "self_reflect", "target": ""}.
+* execute_python: Run Python code and return stdout/stderr. Use for calculations, data analysis, CSV processing, or any task requiring computation. Pass the full Python script as the target string. Format: {"action": "execute_python", "target": "print(2+2)"}.
+* get_ui_tree: Read the accessibility tree of the current active window. Returns button names, text fields, and UI element types. Use before click_element to discover what can be clicked. Format: {"action": "get_ui_tree", "target": ""}.
+* click_element: Click a specific UI element by its Name or AutomationId (from get_ui_tree). More reliable than coordinate clicking. Format: {"action": "click_element", "target": "Save"}.
 
 Operational Guidelines (Phase 30: Personality & Learning):
 1. PERSONALITY: Use the user's name (if known from 'Personality Profile') naturally. Do NOT use repetitive, robotic phrases. Vary your responses.
 2. CONTEXT MEMORY: ALWAYS check the 'User History' and 'Relevant past actions'. If a user asks "What was that file again?", search those logs first.
 3. LEARNING: If the user says "I love Python" or "My name is Krish," use 'set_personality' to remember it. 
 4. BACKGROUND VISION: Reference the BACKGROUND VISUAL CONTEXT to show ambient awareness.
-5. CONCISION: Keep your 'message' short and professional, but elegantly phrased.
+5. CONCISION: Keep your 'message' under 200 characters, short and professional, but elegantly phrased.
 
 Respond ONLY in compact JSON (single object, no Markdown or text before/after):
 {
   "steps": [
     { "action": "...", "target": "...", "extra": {} }
   ],
-  "message": "Natural, human-like confirmation under 140 characters."
+  "message": "Natural, human-like confirmation under 200 characters.",
+  "emotion": "normal"
 }
 Rules: maximum 3 steps; skip steps if not needed; avoid retries/loops; prefer a brief confirmation if unsure.
+Emotion field: Choose from normal, urgent, relaxed, excited, serious, whisper. Match the tone to the situation (e.g. urgent for system warnings, relaxed for casual chat, excited for good news).
 """
 
 
@@ -115,6 +122,32 @@ def _format_relevant(relevant: Iterable[Dict[str, Any]] | None) -> str:
 def describe_screen(prompt: str = "What is on the screen?") -> str:
     """Analyze the last captured screen using Gemini Vision (Cloud) for speed on low-end PCs."""
     img_path = "assets/memory/last_screen.png"
+    
+    # Capture screen on-demand if it does not exist or is stale (older than 5 seconds)
+    try:
+        import mss
+        from PIL import Image
+        stale = True
+        if os.path.exists(img_path):
+            stale = (time.time() - os.path.getmtime(img_path)) > 5.0
+            
+        if not os.path.exists(img_path) or stale:
+            logger.info("[VISION] Capturing fresh screen for on-demand analysis...")
+            os.makedirs(os.path.dirname(img_path), exist_ok=True)
+            with mss.mss() as sct:
+                if len(sct.monitors) > 2:
+                    screenshot = sct.grab(sct.monitors[0])
+                else:
+                    screenshot = sct.grab(sct.monitors[1])
+                img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+                max_width = 1280
+                if img.width > max_width:
+                    ratio = max_width / img.width
+                    img = img.resize((max_width, int(img.height * ratio)), Image.LANCZOS)
+                img.save(img_path, "PNG")
+    except Exception as e:
+        logger.warning(f"On-demand screen capture failed: {e}")
+
     if not os.path.exists(img_path):
         return "I can't see the screen right now. Please tell me to capture it first."
     
@@ -122,21 +155,15 @@ def describe_screen(prompt: str = "What is on the screen?") -> str:
         return "I need a Gemini API key to see the screen without lagging your PC."
 
     try:
-        from google.generativeai import types
+        from PIL import Image
         logger.info("[VISION] Sending screen to Gemini (Cloud)...")
         
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        img = Image.open(img_path)
         
-        # Load image
-        with open(img_path, "rb") as f:
-            img_data = f.read()
-            
-        response = model.generate_content(
-            contents=[
-                prompt,
-                {"mime_type": "image/png", "data": img_data}
-            ]
+        response = client.models.generate_content(
+            model='gemini-2.0-flash',
+            contents=[prompt, img]
         )
         return response.text.strip()
     except Exception as exc:
@@ -161,9 +188,11 @@ def interpret_command(
     
     # Personality context
     personality_ctx = ""
+    user_name = ""
     try:
-        from memory.personality import get_personality_context
+        from memory.personality import get_personality_context, get_user_name
         personality_ctx = get_personality_context()
+        user_name = get_user_name()
         if personality_ctx:
             personality_ctx = f"\n\n{personality_ctx}"
     except Exception:
@@ -180,7 +209,8 @@ def interpret_command(
         pass
 
     # Explicit screen analysis
-    if any(k in user_input.lower() for k in ["screen", "see", "looking at", "this"]):
+    vision_triggers = ["on the screen", "read the screen", "what do you see", "analyze screen", "look at the screen", "describe the screen"]
+    if any(k in user_input.lower() for k in vision_triggers):
         analysis = describe_screen("Analyze this screen carefully and describe what's happening.")
         screen_context += f"\n\nLIVE SCREEN ANALYSIS (on-demand):\n{analysis}"
 
@@ -205,7 +235,8 @@ def interpret_command(
             logger.debug(f"Provider {provider.name} failed: {e}")
             continue
 
-    fail_msg = "Sir, all AI systems are currently unresponsive. "
+    address = f"{user_name}, " if user_name else ""
+    fail_msg = f"{address}all AI systems are currently unresponsive. "
     if not GROQ_API_KEY and not GEMINI_API_KEY:
         fail_msg += "I've detected that my Cloud API keys are missing. "
     else:

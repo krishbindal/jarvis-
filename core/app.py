@@ -20,6 +20,7 @@ Phase 27: Conversation Personality
 import threading
 import time
 import json
+import config
 from typing import Optional, List
 
 from core.action_registry import ACTION_REGISTRY, execute_action
@@ -46,7 +47,7 @@ from brain.researcher import DeepResearchAgent
 from brain.proactive_engine import get_proactive_engine
 from voice.tts_engine import speak, init_tts
 from memory.database import MemoryDB
-from core.interaction_loop import InteractionLoop
+from core.interaction_loop import InteractionLoop, QUICK_ACTIONS
 from core.mcp_hub import get_mcp_hub
 from core.context_state import ContextState
 from brain.agent_planner import plan_steps
@@ -124,7 +125,7 @@ class JarvisApp:
         except Exception as exc:
             logger.error("Failed to start MCP Hub: %s", exc)
 
-    # ─── Activation ───────────────────────────────────────────
+    # --─ Activation ------------------------------------------─
 
     def _handle_activation(self, payload=None) -> None:
         if payload and payload.get("source") == "system_activation":
@@ -156,9 +157,8 @@ class JarvisApp:
             if self.auto_start:
                 self._handle_activation()
             else:
-                logger.info("Listening for 'Hey Jarvis' or double clap...")
-                # Wake word is now handled internally by VoiceListener
-                # self._start_clap_listener() # temporarily disabled to avoid conflicts
+                logger.info(f"Listening for '{config.WAKE_WORD.capitalize()}' or double clap...")
+                self._start_clap_listener()
 
             # Wait for activation
             self._activation_event.wait()
@@ -262,7 +262,7 @@ class JarvisApp:
             msg += f"I see you often use {', and '.join(targets)}."
             speak(msg)
 
-    # ─── Command Pipeline ────────────────────────────────────
+    # --─ Command Pipeline ------------------------------------
 
     def _handle_command(self, payload: dict) -> None:
         """
@@ -289,26 +289,53 @@ class JarvisApp:
             self._context.set_intent(raw_text)
             self._context.set_task(True)
 
+            # Check if this command is conversational/chat or quick before immediate_ack
+            from automation.planner import _is_conversational, _ACTION_PREFIXES
+            is_conversational_cmd = _is_conversational(raw_text)
+            
+            is_quick = False
+            if not is_conversational_cmd:
+                if any(text.startswith(p) for prefixes in _ACTION_PREFIXES for p in prefixes) or text.startswith("download "):
+                    is_quick = True
+                else:
+                    try:
+                        route_res = route_command(text)
+                        if isinstance(route_res, dict) and route_res.get("action") in QUICK_ACTIONS:
+                            is_quick = True
+                    except Exception:
+                        pass
+
             self._interactions.reset()
+            if is_quick:
+                self._interactions.set_quick(True)
+
             if raw_text:
                 self._interactions.immediate_ack(raw_text)
-                self._interactions.stream_thinking(raw_text)
+                # NOTE: stream_thinking removed here — it was starting a background
+                # LLM narration that competed with actual TTS responses from
+                # automation/agent/action flows, causing Jarvis to "not talk back".
+                # The immediate_ack above is sufficient for perceived responsiveness.
 
-            # ── [INPUT] ──────────────────────────────────────
+            # -- [INPUT] --------------------------------------
             source = payload.get("source", "text")
             logger.info("[INPUT] source=%s text='%s'", source, text)
 
             # Signal overlay: thinking
             self._events.emit("overlay_state", {"state": "thinking", "text": text[:40]})
 
-            # ── [AUTOMATION] Universal planner/executor ────
-            automation_outcome = self._run_automation_flow(raw_text)
+            # -- [AUTOMATION] Universal planner/executor ----
+            if is_conversational_cmd:
+                logger.debug("[APP] Skipping automation for conversational/chat command: '%s'", raw_text)
+                automation_outcome = None
+            else:
+                automation_outcome = self._run_automation_flow(raw_text)
+                
             if automation_outcome:
                 final_result, interaction_steps = automation_outcome
                 interaction_done = True
                 return
 
-            # ── [PARSED] ─────────────────────────────────────
+            # -- [PARSED] ------------------------------------─
             route_result = route_command(text)
             logger.info("[PARSED] result=%s", _summary(route_result))
 
@@ -324,7 +351,7 @@ class JarvisApp:
                 # Phase 5: execute each step sequentially
                 result, interaction_steps = self._execute_multi_step(route_result, text, payload)
                 final_result = result
-                self._interactions.finish(result.get("message", "Sequence completed."))
+                self._interactions.finish(result.get("message", "Sequence completed."), emotion=result.get("emotion", "normal"))
                 interaction_done = True
                 return
 
@@ -332,10 +359,10 @@ class JarvisApp:
             result = route_result
             action = result.get("action", "")
 
-            # ── [PARSED] single-step ─────────────────────────
+            # -- [PARSED] single-step ------------------------─
             logger.info("[PARSED] action=%s target='%s'", action, result.get("target", ""))
 
-            # ── 1. Stop / Interruption (Phase 32) ────────────
+            # -- 1. Stop / Interruption (Phase 32) ------------
             if action == "stop":
                 logger.info("[ACTION] STOP! Resetting system state.")
                 self._events.emit("interrupt_tts", {"source": "app_internal"})
@@ -347,30 +374,30 @@ class JarvisApp:
                 interaction_done = True
                 return
 
-            # ── AI Fallback (Phase 12) ───────────────────────
+            # -- AI Fallback (Phase 12) ----------------------─
             if action == "unknown":
                 result, interaction_steps = self._handle_unknown(text, result)
                 final_result = result
                 self._events.emit("command_result", result)
-                self._interactions.finish(result.get("message", "Done."))
+                self._interactions.finish(result.get("message", "Done."), emotion=result.get("emotion", "normal"))
                 interaction_done = True
                 return
 
-            # ── Chat (greeting) — speak immediately ──────────
+            # -- Chat (greeting) — speak immediately ----------
             if action == "chat":
                 extra = result.get("extra", {})
                 exec_result = execute_action(action, result.get("target", ""))
                 result["exec_result"] = exec_result
                 result["message"] = exec_result.get("message", "")
-                logger.info("[ACTION] chat → '%s'", exec_result.get("message", ""))
+                logger.info("[ACTION] chat => '%s'", exec_result.get("message", ""))
                 self._context.update_after_action(action, result.get("target", ""), extra, exec_result)
                 self._events.emit("command_result", result)
                 final_result = result
-                self._interactions.finish(result.get("message", "Done."))
+                self._interactions.finish(result.get("message", "Done."), emotion=result.get("emotion", "normal"))
                 interaction_done = True
                 return
 
-            # ── [ACTION] Execute known action ────────────────
+            # -- [ACTION] Execute known action ----------------
             target = result.get("target", "")
             extra = result.get("extra", {})
 
@@ -386,7 +413,7 @@ class JarvisApp:
                 if action in ["open_app", "open_url", "trigger_n8n"]:
                     self._db.log_usage(action, target)
 
-                # ── [EXECUTION] Log result ───────────────────
+                # -- [EXECUTION] Log result ------------------─
                 logger.info("[EXECUTION] status=%s message='%s'",
                             exec_result.get("status"), exec_result.get("message", ""))
 
@@ -405,7 +432,7 @@ class JarvisApp:
 
             final_result = result
             if not interaction_done:
-                self._interactions.finish(result.get("message", "Done."))
+                self._interactions.finish(result.get("message", "Done."), emotion=result.get("emotion", "normal"))
                 interaction_done = True
 
         except Exception as exc:
@@ -414,7 +441,7 @@ class JarvisApp:
         finally:
             try:
                 if not interaction_done and final_result is not None:
-                    self._interactions.finish(final_result.get("message", "Done."))
+                    self._interactions.finish(final_result.get("message", "Done."), emotion=final_result.get("emotion", "normal"))
                 elif not interaction_done:
                     self._interactions.stop()
             except Exception:
@@ -437,7 +464,7 @@ class JarvisApp:
                 pass
 
     def _run_automation_flow(self, raw_text: str) -> tuple[dict, list] | None:
-        """LLM-driven universal automation pipeline (intent → plan → execute)."""
+        """LLM-driven universal automation pipeline (intent => plan => execute)."""
         plan = build_automation_plan(raw_text, self._context.snapshot())
         if not plan.is_actionable():
             return None
@@ -459,7 +486,7 @@ class JarvisApp:
             pass
         return payload, result.get("steps", [])
 
-    # ─── Multi-Step Execution (Phase 5) ──────────────────────
+    # --─ Multi-Step Execution (Phase 5) ----------------------
 
     def _execute_multi_step(self, steps: List[dict], text: str, payload: dict) -> tuple[dict, List[dict]]:
         """Execute a list of routed command steps sequentially (Phase 5)."""
@@ -473,7 +500,7 @@ class JarvisApp:
             target = step_result.get("target", "")
             extra = step_result.get("extra", {})
 
-            # ── [PARSED] Step ────────────────────────────────
+            # -- [PARSED] Step --------------------------------
             logger.info("[PARSED] Step %d/%d: action=%s target='%s'", i + 1, len(steps), action, target)
             try:
                 self._events.emit("command_progress", {"stage": f"step_{i+1}", "text": f"{action}: {target}"})
@@ -490,7 +517,7 @@ class JarvisApp:
                 self._context.update_after_action(action, target, extra, exec_result)
                 logger.info("[EXECUTION] Step %d: chat completed", i + 1)
             elif action not in ("noop",):
-                # ── [ACTION] Execute Step ────────────────────
+                # -- [ACTION] Execute Step --------------------
                 logger.info("[ACTION] Step %d: %s target='%s'", i + 1, action, target)
                 exec_result = execute_action(action, target, extra, previous_result=previous)
                 step_result["exec_result"] = exec_result
@@ -501,7 +528,7 @@ class JarvisApp:
                 if action in ["open_app", "open_url", "trigger_n8n"]:
                     self._db.log_usage(action, target)
 
-                # ── [EXECUTION] Log Step ─────────────────────
+                # -- [EXECUTION] Log Step --------------------─
                 logger.info("[EXECUTION] Step %d: status=%s message='%s'",
                             i + 1, exec_result.get("status"), exec_result.get("message", ""))
 
@@ -529,7 +556,7 @@ class JarvisApp:
 
         return final_result, all_interaction_steps
 
-    # ─── AI Fallback (Phase 12) ──────────────────────────────
+    # --─ AI Fallback (Phase 12) ------------------------------
 
     def _handle_unknown(self, text: str, result: dict) -> tuple:
         """Send unrecognized commands to AI for interpretation."""
@@ -565,16 +592,16 @@ class JarvisApp:
                     for s, r in zip(validated["steps"], step_results)
                 ]
 
-                result = {"steps": step_results, "type": "ai", "message": ai_msg}
+                result = {"steps": step_results, "type": "ai", "message": ai_msg, "emotion": ai_result.get("emotion", "normal")}
             else:
-                result = {"action": "unknown", "target": "", "message": ai_msg or "I'm not sure how to handle that.", "type": "ai"}
+                result = {"action": "unknown", "target": "", "message": ai_msg or "I'm not sure how to handle that.", "type": "ai", "emotion": ai_result.get("emotion", "normal")}
         except Exception as exc:
             logger.error("[AI-FALLBACK] AI interpretation failed: %s", exc)
             result = {"action": "error", "message": f"Sir, my AI systems encountered an error: {exc}", "type": "error"}
 
         return result, interaction_steps
 
-    # ─── Step Execution ──────────────────────────────────────
+    # --─ Step Execution --------------------------------------
 
     def _execute_step(self, step: dict, previous_result: Optional[dict] = None) -> dict:
         action = step.get("action", "")
@@ -615,23 +642,31 @@ class JarvisApp:
             return {"error": "No valid steps"}
         return {"steps": deduped}
 
-    # ─── Agent Loop (Context-Aware) ──────────────────────────
+    # --─ Agent Loop (Context-Aware) --------------------------
 
     def _should_use_agent_loop(self, route_result) -> bool:
-        """Decide whether to invoke the planner-based agent loop."""
+        """Decide whether to invoke the planner-based agent loop.
+        
+        Fixed: No longer routes to agent loop based solely on task_in_progress.
+        task_in_progress is True for the duration of every command, so this was
+        sending almost everything through the agent loop unnecessarily.
+        """
         if isinstance(route_result, list):
             return False
         action = route_result.get("action") if isinstance(route_result, dict) else "unknown"
         if action == "unknown":
             return True
+        # Only use agent loop when there's an active context AND the action needs it
         if self._context.has_active_context() and action in ("media_control", "noop", "quick_search"):
-            return True
-        if self._context.task_in_progress and action not in ("open_app", "open_dynamic", "open_url", "open_folder", "power_state", "system_check", "chat"):
             return True
         return False
 
     def _run_agent_loop(self, command: str) -> tuple[dict, list]:
-        """Plan → act → observe loop using the tool abstraction layer."""
+        """Plan => act => observe loop using the tool abstraction layer.
+        
+        Fixed: Added 15s global timeout, full step dedup (not just last step),
+        and tighter progress detection to prevent infinite loops.
+        """
         try:
             visual = ""
             try:
@@ -644,10 +679,19 @@ class JarvisApp:
             planner_msg = ""
             feedback = ""
             max_steps = 3
-            last_tool = None
-            last_input = None
+            seen_steps = set()  # Track ALL executed (tool, input) to catch any repeat
+            loop_start = time.monotonic()
+            LOOP_TIMEOUT = 15.0  # Hard wall-clock timeout
 
             for _ in range(max_steps):
+                # Global timeout guard
+                if time.monotonic() - loop_start > LOOP_TIMEOUT:
+                    final_message = planner_msg or "Stopping: time limit reached."
+                    result_payload = {"type": "agent_loop", "steps": executed_steps, "message": final_message}
+                    self._events.emit("command_result", result_payload)
+                    self._interactions.finish(final_message)
+                    return result_payload, executed_steps
+
                 if not pending_steps:
                     ctx_snapshot = self._context.snapshot()
                     steps, planner_msg = plan_steps(command, ctx_snapshot, visual, feedback=feedback)
@@ -668,12 +712,15 @@ class JarvisApp:
                 self._announce_agent_step(tool, step.get("input", ""))
                 input_arg = step.get("input", "")
 
-                if last_tool and tool == last_tool and input_arg == (last_input or ""):
+                # Check if we've already executed this exact step (full dedup)
+                step_key = (tool, input_arg)
+                if step_key in seen_steps:
                     final_message = planner_msg or f"Stopping: repeated action {tool}."
                     result_payload = {"type": "agent_loop", "steps": executed_steps, "message": final_message}
                     self._events.emit("command_result", result_payload)
                     self._interactions.finish(final_message)
                     return result_payload, executed_steps
+                seen_steps.add(step_key)
 
                 before_ctx = self._context.snapshot()
                 result = self._execute_tool_step(tool, input_arg)
@@ -693,9 +740,6 @@ class JarvisApp:
                     self._events.emit("command_result", result_payload)
                     self._interactions.finish(final_message)
                     return result_payload, executed_steps
-
-                last_tool = tool
-                last_input = input_arg
 
                 if not result.get("success", True):
                     feedback = f"Step {tool} failed: {status_line or 'no message'}. Continue from current app/url."
@@ -747,20 +791,26 @@ class JarvisApp:
 
     @staticmethod
     def _has_progress(before: dict, after: dict, result: dict) -> bool:
-        """Detect whether context or output moved forward to prevent loops."""
-        keys = ("current_app", "current_url", "last_action", "last_result_status", "last_result_message", "task_in_progress")
-        for key in keys:
+        """Detect whether context or output moved forward to prevent loops.
+        
+        Fixed: Only counts real context changes (current_app, current_url) as progress.
+        Ignoring last_action/last_result_message changes which always differ between steps
+        and gave a false sense of progress.
+        """
+        # Only meaningful context changes count as progress
+        meaningful_keys = ("current_app", "current_url")
+        for key in meaningful_keys:
             if before.get(key) != after.get(key):
                 return True
         if result.get("success") and result.get("output"):
             return True
         return False
 
-    # ─── Proactive Intelligence (Phase 19) ────────────────────
+    # --─ Proactive Intelligence (Phase 19) --------------------
 
     def _start_proactive_loop(self) -> None:
         """Start the background proactivity loop using ProactiveEngine."""
-        get_proactive_engine(self._events).start()
+        get_proactive_engine(self._events, context_state=self._context).start()
 
     def _start_autonomy_loop(self) -> None:
         """Launch the habit observer & scheduler."""
@@ -787,7 +837,7 @@ class JarvisApp:
             logger.debug("TTS unavailable for autonomy suggestion.")
 
 
-    # ─── Shutdown ────────────────────────────────────────────
+    # --─ Shutdown --------------------------------------------
 
     def _shutdown(self) -> None:
         self._running = False

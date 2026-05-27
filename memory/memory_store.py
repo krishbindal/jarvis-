@@ -22,7 +22,7 @@ def get_embedding(text: str) -> Optional[List[float]]:
         response = requests.post(
             f"{OLLAMA_BASE}/api/embeddings",
             json={"model": EMBED_MODEL, "prompt": text},
-            timeout=5
+            timeout=1.0
         )
         return response.json().get("embedding")
     except Exception:
@@ -37,10 +37,15 @@ def cosine_similarity(v1, v2):
 
 def _fetch_embedding_in_bg(role: str, content: str, context: Dict):
     """Fetch embedding and store asynchronously."""
-    vec = get_embedding(content)
-    blob = struct.pack(f'{len(vec)}f', *vec) if vec else None
-    with _LOCK:
-        _DB.add_interaction(role, content, context=context, embedding=blob)
+    try:
+        vec = get_embedding(content)
+        blob = struct.pack(f'{len(vec)}f', *vec) if vec else None
+        with _LOCK:
+            _DB.add_interaction(role, content, context=context, embedding=blob)
+    except Exception:
+        # Never crash a background thread over embedding failures
+        with _LOCK:
+            _DB.add_interaction(role, content, context=context, embedding=None)
 
 def save_interaction(user_input: str, steps: List[Dict[str, Any]], result: Dict[str, Any]) -> None:
     """Save interaction with content and metadata (computes vectors in background)."""
@@ -116,15 +121,9 @@ def store_preference(key: str, value: Any) -> None:
 
 def get_preference(key: str) -> Optional[str]:
     """Retrieve learned preference."""
-    # Simple direct query
-    import sqlite3
-    db_path = "memory/jarvis.db"
     try:
-        with sqlite3.connect(db_path) as conn:
-            c = conn.cursor()
-            c.execute("SELECT value FROM knowledge WHERE key = ?", (key,))
-            res = c.fetchone()
-            return res[0] if res else None
+        with _LOCK:
+            return _DB.get_preference(key)
     except Exception:
         return None
 

@@ -1,8 +1,9 @@
 from typing import Dict, Any
-import google.generativeai as genai
+from google import genai
 from utils.logger import get_logger
 from config import GEMINI_API_KEY
 from brain.providers.base import AIProvider, _safe_json_extract, _validate_steps
+from brain.provider_config import GEMINI_MODEL, COMMAND_TEMP
 
 logger = get_logger(__name__)
 
@@ -23,8 +24,11 @@ class GeminiProvider(AIProvider):
         logger.info(f"[AI] Attempting {self.name} (Cloud)...")
         client = genai.Client(api_key=GEMINI_API_KEY)
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            contents=full_prompt
+            model=GEMINI_MODEL,
+            contents=full_prompt,
+            config=genai.types.GenerateContentConfig(
+                temperature=COMMAND_TEMP,
+            ),
         )
         parsed = _safe_json_extract(response.text)
         if parsed.get("steps"):
@@ -39,7 +43,7 @@ class GeminiProvider(AIProvider):
         full_prompt = f"{system_msg}\n\nTask: {prompt}\n\nResponse:"
         client = genai.Client(api_key=GEMINI_API_KEY)
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            contents=full_prompt
+            model=GEMINI_MODEL,
+            contents=full_prompt,
         )
         return response.text.strip()

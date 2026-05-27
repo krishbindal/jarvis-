@@ -4,12 +4,12 @@ from __future__ import annotations
 Universal Dynamic Command Router for JARVIS-X Dexter Copilot.
 
 Architecture (Phase 14 — Clean Separation):
-    command_parser.py  → NLP normalization, multi-step split, session context
-    command_cache.py   → LRU cache for repeated commands
-    command_router.py  → Pattern matching + dynamic type detection (this file)
-    action_registry.py → Execution engine with self-healing fallback
+    command_parser.py  => NLP normalization, multi-step split, session context
+    command_cache.py   => LRU cache for repeated commands
+    command_router.py  => Pattern matching + dynamic type detection (this file)
+    action_registry.py => Execution engine with self-healing fallback
 
-All natural language → NO hardcoded sites/apps → dynamic type detection.
+All natural language => NO hardcoded sites/apps => dynamic type detection.
 """
 
 import re
@@ -25,9 +25,9 @@ from skills import match_skill
 
 logger = get_logger(__name__)
 
-# ─────────────────────────────────────────────────
+# -------------------------------------------------
 # Extensible Lookup Tables (not hardcoded logic)
-# ─────────────────────────────────────────────────
+# -------------------------------------------------
 
 _SITE_SHORTCUTS = {
     "youtube":   "https://www.youtube.com",
@@ -120,9 +120,9 @@ _GREETINGS = (
 _PLACEHOLDER_FIELDS = ("path", "name", "src", "dest", "new_name", "root_path")
 
 
-# ─────────────────────────────────────────────────
+# -------------------------------------------------
 # Target Intelligence (Phase 2)
-# ─────────────────────────────────────────────────
+# -------------------------------------------------
 
 def _classify_target(target: str) -> str:
     t = target.lower().strip()
@@ -167,9 +167,9 @@ def _resolve_app(app_name: str) -> str:
     return _APP_MAP.get(app_name.lower().strip(), app_name.lower().strip())
 
 
-# ─────────────────────────────────────────────────
+# -------------------------------------------------
 # Build helpers
-# ─────────────────────────────────────────────────
+# -------------------------------------------------
 
 def _build(action: str, target: str, message: str, extra: Optional[dict] = None) -> Dict:
     result = {"action": action, "target": target, "message": message, "type": "system"}
@@ -182,9 +182,9 @@ def _clean(val: str) -> str:
     return val.strip().strip('"').strip("'")
 
 
-# ─────────────────────────────────────────────────
+# -------------------------------------------------
 # Spec matchers (file/network commands from JSON)
-# ─────────────────────────────────────────────────
+# -------------------------------------------------
 
 def _phrase_to_regex(phrase: str) -> re.Pattern[str]:
     pattern = re.escape(phrase.lower())
@@ -238,9 +238,9 @@ def _match_network_command(normalized: str) -> Dict | None:
     return None
 
 
-# ─────────────────────────────────────────────────
+# -------------------------------------------------
 # SINGLE-STEP ROUTER (internal)
-# ─────────────────────────────────────────────────
+# -------------------------------------------------
 
 def _route_single(normalized: str) -> Dict:
     """Route a single normalized command string. Used internally by route_command."""
@@ -250,15 +250,15 @@ def _route_single(normalized: str) -> Dict:
 
     logger.parsed(normalized)
 
-    # ── 1. Greetings ──────────────────────────────────────────
+    # -- 1. Greetings ------------------------------------------
     if normalized in _GREETINGS or any(normalized.startswith(g) for g in _GREETINGS):
         return _build("chat", normalized, "Greeting")
 
-    # ── 1.2. Stop / Cancel (High Priority Reset) ──────────────
+    # -- 1.2. Stop / Cancel (High Priority Reset) --------------
     if normalized in ("stop", "kill task", "shut up", "abort", "cancel", "stop everything", "reset"):
         return _build("stop", "", "Sir, I am stopping all current tasks.")
 
-    # ── 1.5. Plugin/Skill System (Phase 26) — MOVE TO TOP ─────
+    # -- 1.5. Plugin/Skill System (Phase 26) — MOVE TO TOP -----
     skill_match = match_skill(normalized)
     if skill_match:
         return _build(
@@ -267,17 +267,17 @@ def _route_single(normalized: str) -> Dict:
             skill_match['description'],
         )
 
-    # ── 2. File-spec (JSON patterns) ──────────────────────────
+    # -- 2. File-spec (JSON patterns) --------------------------
     file_cmd = _match_file_command(normalized)
     if file_cmd:
         return file_cmd
 
-    # ── 3. Network-spec (JSON patterns) ───────────────────────
+    # -- 3. Network-spec (JSON patterns) -----------------------
     net_cmd = _match_network_command(normalized)
     if net_cmd:
         return net_cmd
 
-    # ── 4. n8n workflows ──────────────────────────────────────
+    # -- 4. n8n workflows --------------------------------------
     if normalized.startswith("send to telegram"):
         return _build("trigger_n8n", "send_to_telegram", "Running workflow")
     if normalized.startswith("backup file"):
@@ -286,7 +286,7 @@ def _route_single(normalized: str) -> Dict:
     if wf:
         return _build("trigger_n8n", wf.group(1).strip(), "Running workflow")
 
-    # ── 5. Navigation ─────────────────────────────────────────
+    # -- 5. Navigation -----------------------------------------
     nav = re.match(r"^(?:go to|take me to|navigate to|open my)\s+(.+)$", normalized)
     if nav:
         target = nav.group(1).strip()
@@ -296,7 +296,7 @@ def _route_single(normalized: str) -> Dict:
                           extra={"resolved_type": "url"})
         return _build("open_folder", _resolve_folder(target), f"Opening {target}")
 
-    # ── 6. Dynamic Open: open <target> on/in <app> ────────────
+    # -- 6. Dynamic Open: open <target> on/in <app> ------------
     open_with = re.match(
         r"^(?:open|launch|start)\s+(.+?)\s+(?:on|in|with|using)\s+(.+)$", normalized
     )
@@ -319,13 +319,13 @@ def _route_single(normalized: str) -> Dict:
         else:
             return _build("open_folder", _resolve_folder(target), f"Opening folder {target}")
 
-    # ── 7. Open folder <name> ─────────────────────────────────
+    # -- 7. Open folder <name> ---------------------------------
     folder_match = re.match(r"^(?:open|launch|start)\s+folder\s+(.+)$", normalized)
     if folder_match:
         target = folder_match.group(1).strip().strip("'\"")
         return _build("open_folder", _resolve_folder(target), f"Opening folder {target}")
 
-    # ── 8. Open <target> (generic — dynamic type detection) ───
+    # -- 8. Open <target> (generic — dynamic type detection) ---
     open_generic = re.match(r"^(?:open|launch|start)\s+(.+)$", normalized)
     if open_generic:
         target = open_generic.group(1).strip()
@@ -353,12 +353,12 @@ def _route_single(normalized: str) -> Dict:
             session.record("open_app", target, app=_resolve_app(target))
             return _build("open_app", target, f"Opening {target}")
 
-    # ── 9. Media Controls ─────────────────────────────────────
+    # -- 9. Media Controls -------------------------------------
     for phrase, action_key in _MEDIA_KEYWORDS.items():
         if re.search(rf"\b{re.escape(phrase)}\b", normalized):
             return _build("media_control", action_key, f"Executing: {action_key}")
 
-    # ── 10. Power Controls ────────────────────────────────────
+    # -- 10. Power Controls ------------------------------------
     if re.search(r"\b(lock|lock\s+(pc|computer|screen|workstation))\b", normalized):
         return _build("power_state", "lock", "Locking workstation")
     if re.search(r"\b(sleep|suspend|hibernate)\s*(pc|computer|laptop)?\b", normalized):
@@ -368,11 +368,11 @@ def _route_single(normalized: str) -> Dict:
     if re.search(r"\b(restart|reboot)\s*(pc|computer|laptop)?\b", normalized):
         return _build("power_state", "restart", "Restarting")
 
-    # ── 11. Vision / Screen ───────────────────────────────────
+    # -- 11. Vision / Screen -----------------------------------
     if re.search(r"\b(capture screen|take screenshot|screenshot|what is on my screen|see my screen|what do you see)\b", normalized):
         return _build("capture_screen", "", "Capturing screen context")
 
-    # ── 12. Web Search ────────────────────────────────────────
+    # -- 12. Web Search ----------------------------------------
     search_match = re.match(
         r"^(?:search for|search the web for|search|what is|who is|look up|google|search google)\s+(.+)$",
         normalized
@@ -382,7 +382,7 @@ def _route_single(normalized: str) -> Dict:
         if q:
             return _build("quick_search", q, f"Searching web for: {q}")
 
-    # ── 13. Close / Kill App ──────────────────────────────────
+    # -- 13. Close / Kill App ----------------------------------
     close_match = re.match(r"^(?:close|kill|stop|terminate|exit)\s+(?:the\s+)?(?:app|application|process|program)?\s*(.+)$", normalized)
     if close_match:
         target = close_match.group(1).strip()
@@ -393,7 +393,7 @@ def _route_single(normalized: str) -> Dict:
         exe = _resolve_app(target)
         return _build("kill_process", exe, f"Closing {target}")
 
-    # ── 14. Fallback → NLU Reasoner (Phase 6/26) ──────────
+    # -- 14. Fallback => NLU Reasoner (Phase 6/26) ----------
     logger.info(f"[ROUTER] No direct pattern match for '{normalized}'. Using NLU Reasoner...")
     try:
         from skills.system_agent import _generate_code
@@ -406,9 +406,9 @@ def _route_single(normalized: str) -> Dict:
     return _build("unknown", "", "Command not recognized.")
 
 
-# ─────────────────────────────────────────────────
+# -------------------------------------------------
 # PUBLIC API
-# ─────────────────────────────────────────────────
+# -------------------------------------------------
 
 def route_command(text: str) -> Dict | List[Dict]:
     """

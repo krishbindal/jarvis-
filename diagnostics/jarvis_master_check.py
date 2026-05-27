@@ -16,7 +16,21 @@ from typing import Dict, List, Any
 from pathlib import Path
 from utils.logger import get_logger
 
-# Import internal modules (we catch errors individually)
+# 1. Standardize environment
+root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if root_dir not in sys.path:
+    sys.path.append(root_dir)
+
+# 2. Fix encoding for Windows
+try:
+    if sys.platform == "win32":
+        import codecs
+        sys.stdout.reconfigure(encoding='utf-8')
+except (AttributeError, ImportError):
+    pass
+
+from utils.logger import get_logger
+
 logger = get_logger("JARVIS_SENTINEL")
 
 class JarvisMasterCheck:
@@ -24,11 +38,11 @@ class JarvisMasterCheck:
 
     def __init__(self):
         self._results: Dict[str, Any] = {}
-        self._db_path = "memory/jarvis.db"
+        self._db_path = os.path.join(root_dir, "memory", "jarvis.db")
 
     def run_all(self):
         print("\n" + "="*50)
-        print("🚀 JARVIS-X: INITIATING MASTER SYSTEM DIAGNOSTIC")
+        print(" JARVIS-X: INITIATING MASTER SYSTEM DIAGNOSTIC")
         print("="*50 + "\n")
 
         self.check_connectivity()
@@ -42,7 +56,7 @@ class JarvisMasterCheck:
         self.print_final_report()
 
     def check_connectivity(self):
-        print("🌐 [1/7] Testing Network Connectivity...")
+        print(" [1/7] Testing Network Connectivity...")
         try:
             socket.create_connection(("google.com", 80), timeout=3)
             self._results["Network"] = ("PASS", "Internet connectivity established.")
@@ -50,7 +64,7 @@ class JarvisMasterCheck:
             self._results["Network"] = ("WARN", "No internet connection. Hybrid/Online features will fall back to local mode.")
 
     def check_ai_providers(self):
-        print("🧠 [2/7] Checking Cloud AI Providers...")
+        print(" [2/7] Checking Cloud AI Providers...")
         from config import GROQ_API_KEY, GEMINI_API_KEY
         
         status = []
@@ -67,7 +81,7 @@ class JarvisMasterCheck:
         self._results["Cloud AI"] = ("PASS" if all("ONLINE" in s for s in status) else "WARN", "; ".join(status))
 
     def check_local_ai(self):
-        print("🤖 [3/7] Checking Local AI (Ollama)...")
+        print(" [3/7] Checking Local AI (Ollama)...")
         try:
             resp = requests.get("http://localhost:11434/api/tags", timeout=3)
             if resp.status_code == 200:
@@ -88,11 +102,11 @@ class JarvisMasterCheck:
              self._results["Local AI"] = ("FAIL", "Ollama is not running. Local AI and Vector RAG will not work.")
 
     def check_voice_engines(self):
-        print("🎙️ [4/7] Checking Voice Interaction (TTS/STT)...")
+        print(" [4/7] Checking Voice Interaction (TTS/STT)...")
         status = []
         
         # STT (Vosk)
-        vosk_path = "voice/vosk-model-small-en-us-0.15"
+        vosk_path = os.path.join(root_dir, "voice", "model")
         if os.path.exists(vosk_path):
             status.append("Vosk Offline STT READY")
         else:
@@ -108,7 +122,7 @@ class JarvisMasterCheck:
         self._results["Voice"] = ("PASS" if "READY" in str(status) else "FAIL", "; ".join(status))
 
     def check_memory_systems(self):
-        print("📂 [5/7] Checking Memory & Vector Database...")
+        print(" [5/7] Checking Memory & Vector Database...")
         try:
             conn = sqlite3.connect(self._db_path)
             c = conn.cursor()
@@ -127,7 +141,7 @@ class JarvisMasterCheck:
             self._results["Database"] = ("FAIL", f"SQLite error: {e}")
 
     def check_triggers(self):
-        print("🛡️ [6/7] Checking Advanced Triggers (Deep Dexter/Armor)...")
+        print(" [6/7] Checking Advanced Triggers...")
         issues = []
         
         # Clipboard
@@ -157,7 +171,7 @@ class JarvisMasterCheck:
         self._results["Triggers"] = ("PASS" if not issues else "WARN", status)
 
     def check_action_registry(self):
-        print("⚙️ [7/7] Checking Action Registry (Skills)...")
+        print(" [7/7] Checking Action Registry (Skills)...")
         try:
             from core.action_registry import ACTION_REGISTRY
             from skills import list_skills
@@ -173,15 +187,15 @@ class JarvisMasterCheck:
         
         all_passed = True
         for sys_name, (status, msg) in self._results.items():
-            icon = "✅" if status == "PASS" else "⚠️" if status == "WARN" else "❌"
+            icon = "[PASS]" if status == "PASS" else "[WARN]" if status == "WARN" else "[FAIL]"
             if status == "FAIL": all_passed = False
             print(f"{icon} {sys_name:<15} : {status:<5} | {msg}")
         
         print("\n" + "="*50)
         if all_passed:
-            print("🤩 STATUS: ALL SYSTEMS NOMINAL - JARVIS-X IS FULLY OPERATIONAL")
+            print(" STATUS: ALL SYSTEMS NOMINAL - JARVIS-X IS FULLY OPERATIONAL")
         else:
-             print("⚠️ STATUS: DEGRADED PERFORMANCE - SOME SYSTEMS REQUIRE ATTENTION")
+             print(" STATUS: DEGRADED PERFORMANCE - SOME SYSTEMS REQUIRE ATTENTION")
         print("="*50 + "\n")
 
 if __name__ == "__main__":

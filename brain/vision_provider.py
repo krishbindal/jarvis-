@@ -15,8 +15,8 @@ import threading
 import time
 from typing import Optional, Dict, Any
 
-import google.generativeai as genai
-from google.generativeai import types
+from google import genai
+
 from PIL import Image
 
 from config import GEMINI_API_KEY
@@ -145,16 +145,13 @@ class VisionProvider:
             buf.seek(0)
 
             # Send to Gemini Vision
-            genai.configure(api_key=GEMINI_API_KEY)
-            model = genai.GenerativeModel(VISION_MODEL)
+            client = genai.Client(api_key=GEMINI_API_KEY)
             
-            # Load image from buffer
-            img_data = buf.read()
-            
-            response = model.generate_content(
+            response = client.models.generate_content(
+                model=VISION_MODEL,
                 contents=[
                     VISION_PROMPT,
-                    {"mime_type": "image/jpeg", "data": img_data}
+                    img
                 ]
             )
 
@@ -196,13 +193,13 @@ class VisionProvider:
             Example: {{"x": 500, "y": 500}} for the exact center.
             If not visible, return {{"x": -1, "y": -1}}."""
 
-            genai.configure(api_key=GEMINI_API_KEY)
-            model = genai.GenerativeModel(VISION_MODEL)
+            client = genai.Client(api_key=GEMINI_API_KEY)
             
-            response = model.generate_content(
+            response = client.models.generate_content(
+                model=VISION_MODEL,
                 contents=[
                     prompt,
-                    {"mime_type": "image/jpeg", "data": img_data}
+                    img
                 ]
             )
 

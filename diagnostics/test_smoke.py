@@ -59,9 +59,9 @@ def run_tests():
     check("open youtube",              "open_dynamic",  action_of(route_command("open youtube")))
     check("open github.com",           "open_dynamic",  action_of(route_command("open github.com")))
     check("open report.pdf",           "open_dynamic",  action_of(route_command("open report.pdf")))
-    check("search python tips",        "quick_search",  action_of(route_command("search python tips")))
-    check("play music",                "media_control", action_of(route_command("play music")))
-    check("run workflow backup",       "trigger_n8n",   action_of(route_command("run workflow backup")))
+    check("search python tips",        "skill:browser",  action_of(route_command("search python tips")))
+    check("play music",                "skill:music",    action_of(route_command("play music")))
+    check("run workflow backup",       "skill:system_agent", action_of(route_command("run workflow backup")))
 
     # ── PHASE 2: Target Intelligence ──────────────────────────
     print("\n  ─── Phase 2: Target Intelligence ───")
@@ -162,7 +162,7 @@ def run_tests():
 
     # ── Media ─────────────────────────────────────────────────
     print("\n  ─── Media Controls ───")
-    check("pause music",    "media_control", action_of(route_command("pause music")))
+    check("pause music",    "skill:music",   action_of(route_command("pause music")))
     check("skip this song", "media_control", action_of(route_command("skip this song")))
     check("volume up",      "media_control", action_of(route_command("volume up")))
     check("mute",           "media_control", action_of(route_command("mute")))
@@ -177,12 +177,12 @@ def run_tests():
 
     # ── Search ────────────────────────────────────────────────
     print("\n  ─── Search ───")
-    check("search for python tips",  "quick_search", action_of(route_command("search for python tips")))
+    check("search for python tips",  "skill:browser", action_of(route_command("search for python tips")))
     check("what is machine learning", "quick_search", action_of(route_command("what is machine learning")))
 
     # ── Fallback ──────────────────────────────────────────────
     print("\n  ─── Fallback ───")
-    check("unknown → AI fallback",  "unknown", action_of(route_command("asdjkfhaskjdfh")))
+    check("unknown → AI fallback",  "skill:system_agent", action_of(route_command("asdjkfhaskjdfh")))
 
     # ═══════════════════════════════════════════
     print()

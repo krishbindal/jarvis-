@@ -71,7 +71,7 @@ def _call_ollama(prompt: str) -> str:
 def _call_groq(prompt: str) -> str:
     if not GROQ_API_KEY:
         raise RuntimeError("No Groq key")
-    client = Groq(api_key=GROQ_API_KEY, timeout=8.0)
+    client = Groq(api_key=GROQ_API_KEY, timeout=5.0)
     completion = client.chat.completions.create(
         model="llama-3.1-8b-instant",
         messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],

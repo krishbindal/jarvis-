@@ -57,6 +57,17 @@ VOICE = "en-GB-RyanNeural"
 RATE = "+5%"     # Slightly faster for responsiveness
 PITCH = "+0Hz"   # Natural pitch
 
+# ── Dynamic Emotion Presets ──────────────────────────────────
+# Maps emotion tags to Edge-TTS rate/pitch overrides
+EMOTION_PRESETS = {
+    "normal":   {"rate": "+5%",  "pitch": "+0Hz"},
+    "urgent":   {"rate": "+18%", "pitch": "+4Hz"},
+    "relaxed":  {"rate": "-5%",  "pitch": "-2Hz"},
+    "excited":  {"rate": "+12%", "pitch": "+3Hz"},
+    "serious":  {"rate": "+0%",  "pitch": "-3Hz"},
+    "whisper":  {"rate": "-8%",  "pitch": "-4Hz"},
+}
+
 
 class TTSEngine:
     """Asynchronous TTS engine using Edge-TTS and Pygame with overlay integration."""
@@ -92,15 +103,18 @@ class TTSEngine:
     def is_speaking(self) -> bool:
         return self._is_speaking
 
-    async def _synthesize(self, text: str, output_file: str) -> None:
-        """Generate speech audio file using Edge TTS."""
+    async def _synthesize(self, text: str, output_file: str, emotion: str = "normal") -> None:
+        """Generate speech audio file using Edge TTS with emotion modulation."""
         if not _EDGE_AVAILABLE:
             logger.warning("[TTS] Edge TTS unavailable; skipping synthesis.")
             return
-        communicate = edge_tts.Communicate(text, VOICE, rate=RATE, pitch=PITCH)
+        preset = EMOTION_PRESETS.get(emotion, EMOTION_PRESETS["normal"])
+        rate = preset["rate"]
+        pitch = preset["pitch"]
+        communicate = edge_tts.Communicate(text, VOICE, rate=rate, pitch=pitch)
         await communicate.save(output_file)
 
-    def speak(self, text: str) -> None:
+    def speak(self, text: str, emotion: str = "normal") -> None:
         """Thread-safe call to speak text with overlay state signaling and audio ducking."""
         if not text:
             return
@@ -134,7 +148,7 @@ class TTSEngine:
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
                         tmp_path = tmp.name
 
-                    asyncio.run(self._synthesize(text, tmp_path))
+                    asyncio.run(self._synthesize(text, tmp_path, emotion=emotion))
 
                     # 2. Audio Ducking — Lower music volume if active
                     if pygame.mixer.music.get_busy():
@@ -209,10 +223,12 @@ class TTSEngine:
         """Stop any active playback immediately."""
         self._interrupted = True
         try:
-            if pygame.mixer.music.get_busy():
-                pygame.mixer.music.stop()
-        except Exception:
-            pass
+            if hasattr(pygame, 'mixer') and pygame.mixer.get_init():
+                channel = pygame.mixer.Channel(0)
+                if channel.get_busy():
+                    channel.stop()
+        except Exception as e:
+            logger.debug(f"[TTS] Error stopping channel: {e}")
 
 
 # Global instance
@@ -227,9 +243,9 @@ def init_tts(event_bus=None) -> None:
     _engine = TTSEngine(event_bus=event_bus)
 
 
-def speak(text: str) -> None:
-    """Speak text using the global TTS engine."""
+def speak(text: str, emotion: str = "normal") -> None:
+    """Speak text using the global TTS engine with optional emotion."""
     global _engine
     if _engine is None:
         _engine = TTSEngine(event_bus=_event_bus_ref)
-    _engine.speak(text)
+    _engine.speak(text, emotion=emotion)

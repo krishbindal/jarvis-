@@ -44,9 +44,9 @@ from executor.system_executor import (
 logger = logging.getLogger("jarvis.executor")
 
 
-# ───────────────────────────────────────────────────────────
+# ----------------------------------------------------------─
 # Dynamic Handlers
-# ───────────────────────────────────────────────────────────
+# ----------------------------------------------------------─
 
 def _chat_handler(target: str) -> Dict[str, Any]:
     """Handle conversational/greeting messages with varied responses."""
@@ -101,7 +101,7 @@ def _open_dynamic_handler(target: str, extra: Optional[Dict] = None) -> Dict[str
 
     attempts = []
 
-    # ── Attempt 1: Open with specified app ────────────────────
+    # -- Attempt 1: Open with specified app --------------------
     if app:
         try:
             logger.info("[EXEC] Attempt 1: Opening %s '%s' in '%s'", resolved_type, target, app)
@@ -120,7 +120,7 @@ def _open_dynamic_handler(target: str, extra: Optional[Dict] = None) -> Dict[str
             attempts.append(f"App launch failed ({app}): {exc}")
             logger.warning("[EXEC] Attempt 1 failed: %s", exc)
 
-    # ── Attempt 2: System default (start "" "target") ─────────
+    # -- Attempt 2: System default (start "" "target") --------─
     try:
         logger.info("[EXEC] Attempt 2: Opening '%s' with system default", target)
         subprocess.Popen(f'start "" "{target}"', shell=True)
@@ -130,7 +130,7 @@ def _open_dynamic_handler(target: str, extra: Optional[Dict] = None) -> Dict[str
         attempts.append(f"System start failed: {exc}")
         logger.warning("[EXEC] Attempt 2 failed: %s", exc)
 
-    # ── Attempt 3: os.startfile fallback ──────────────────────
+    # -- Attempt 3: os.startfile fallback ----------------------
     try:
         logger.info("[EXEC] Attempt 3: os.startfile fallback for '%s'", target)
         os.startfile(target)
@@ -172,9 +172,9 @@ def _open_folder_handler(target: str) -> Dict[str, Any]:
             return {"success": False, "status": "error", "message": str(exc2)}
 
 
-# ───────────────────────────────────────────────────────────
+# ----------------------------------------------------------─
 # Safe Executor Wrapper (Phase 7 — Error Handling)
-# ───────────────────────────────────────────────────────────
+# ----------------------------------------------------------─
 
 def _safe_exec(func, *args, **kwargs) -> Dict[str, Any]:
     """Wrap any executor function in try/except with structured error info."""
@@ -189,9 +189,9 @@ def _safe_exec(func, *args, **kwargs) -> Dict[str, Any]:
         }
 
 
-# ───────────────────────────────────────────────────────────
+# ----------------------------------------------------------─
 # Action Registry
-# ───────────────────────────────────────────────────────────
+# ----------------------------------------------------------─
 
 ACTION_REGISTRY = {
     # File operations
@@ -226,12 +226,17 @@ ACTION_REGISTRY = {
     "chat": _chat_handler,
     "system_check": _system_check_handler,
     "set_personality": lambda target: __import__("memory.personality", fromlist=["set_personality_handler"]).set_personality_handler(target),
+    "self_reflect": lambda target: __import__("memory.personality", fromlist=["run_self_reflection"]).run_self_reflection(),
+    # Phase 35: Advanced Tools
+    "execute_python": lambda target: __import__("executor.agent_tools", fromlist=["execute_python"]).execute_python(target),
+    "get_ui_tree": lambda target: __import__("executor.agent_tools", fromlist=["get_ui_tree"]).get_ui_tree(),
+    "click_element": lambda target: __import__("executor.agent_tools", fromlist=["click_element"]).click_element(target),
 }
 
 
-# ───────────────────────────────────────────────────────────
+# ----------------------------------------------------------─
 # Executor (Phase 4 + Phase 7 + Phase 10)
-# ───────────────────────────────────────────────────────────
+# ----------------------------------------------------------─
 
 def execute_action(
     action: str,
@@ -242,7 +247,7 @@ def execute_action(
     """Execute a routed action with plugin system support and fallback logic."""
     extra = extra or {}
     
-    # ── Input Sanitization (Phase 32) ────────────────────────
+    # -- Input Sanitization (Phase 32) ------------------------
     # Some AI providers hallucinate argument names in the target string
     if target:
         # e.g. "name=chrome" -> "chrome", "app=spotify" -> "spotify"
@@ -259,23 +264,23 @@ def execute_action(
         hub = get_mcp_hub()
         return _safe_exec(hub.call_tool, action, extra)
 
-    # ── 1.5 Skill Handlers (Phase 16) ───────────────────────
+    # -- 1.5 Skill Handlers (Phase 16) ----------------------─
     if action.startswith("skill:"):
         skill_name = action.replace("skill:", "")
         logger.info(f"[EXEC] Routing to skill: {skill_name}")
         return _safe_exec(execute_skill, skill_name, target, extra)
 
-    # ── 2. Special Handlers ──────────────────────────────────
+    # -- 2. Special Handlers ----------------------------------
     if action == "open_dynamic":
         return _safe_exec(_open_dynamic_handler, target, extra)
 
-    # ── 3. Registry Checks ───────────────────────────────────
+    # -- 3. Registry Checks ----------------------------------─
     func = ACTION_REGISTRY.get(action)
     if not func:
         logger.error(f"[EXEC] Unsupported action: {action}")
         return {"success": False, "status": "error", "message": f"Unsupported action: {action}"}
 
-    # ── Route with proper argument shapes ─────────────────────
+    # -- Route with proper argument shapes --------------------─
     if action == "create_folder":
         return _safe_exec(func, target, extra.get("path"))
     if action in ("move_file", "copy_file"):

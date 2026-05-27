@@ -88,3 +88,140 @@ def scroll(amount: int | str = -800) -> Dict[str, Any]:
         return {"success": True, "status": "success", "message": f"Scrolled {distance}"}
     except Exception as exc:  # noqa: BLE001
         return {"success": False, "status": "error", "message": str(exc)}
+
+
+# ── Python Code Interpreter (Phase 35) ───────────────────────
+
+def execute_python(code: str) -> Dict[str, Any]:
+    """Execute Python code in a sandboxed subprocess and return stdout/stderr."""
+    import tempfile
+    import subprocess
+    import os
+
+    workspace = os.path.join(tempfile.gettempdir(), "jarvis_sandbox")
+    os.makedirs(workspace, exist_ok=True)
+    script_path = os.path.join(workspace, "_jarvis_exec.py")
+
+    try:
+        with open(script_path, "w", encoding="utf-8") as f:
+            f.write(code)
+
+        result = subprocess.run(
+            ["python", script_path],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=workspace,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+
+        stdout = result.stdout.strip()
+        stderr = result.stderr.strip()
+
+        if result.returncode == 0:
+            return {
+                "success": True,
+                "status": "success",
+                "message": f"Code executed successfully.",
+                "output": stdout or "(no output)",
+            }
+        else:
+            return {
+                "success": False,
+                "status": "error",
+                "message": f"Script exited with code {result.returncode}",
+                "output": stderr or stdout or "(no output)",
+            }
+    except subprocess.TimeoutExpired:
+        return {"success": False, "status": "error", "message": "Script timed out after 30 seconds."}
+    except Exception as exc:
+        return {"success": False, "status": "error", "message": str(exc)}
+    finally:
+        try:
+            os.remove(script_path)
+        except Exception:
+            pass
+
+
+# ── Semantic UI Automation (Phase 35) ─────────────────────────
+
+def get_ui_tree(depth: int = 3) -> Dict[str, Any]:
+    """Read the Windows Accessibility tree of the active window."""
+    try:
+        import uiautomation as auto
+
+        root = auto.GetForegroundControl()
+        if not root:
+            return {"success": False, "status": "error", "message": "No foreground window found."}
+
+        def _walk(ctrl, d: int = 0) -> list:
+            items = []
+            if d > depth:
+                return items
+            try:
+                name = ctrl.Name or ""
+                ctrl_type = ctrl.ControlTypeName or ""
+                auto_id = ctrl.AutomationId or ""
+                entry = {"type": ctrl_type, "name": name}
+                if auto_id:
+                    entry["id"] = auto_id
+                items.append(entry)
+                for child in ctrl.GetChildren():
+                    items.extend(_walk(child, d + 1))
+            except Exception:
+                pass
+            return items
+
+        tree = _walk(root)
+        # Truncate to avoid massive payloads
+        tree = tree[:80]
+        summary = ", ".join([f"{e['type']}:{e['name'][:30]}" for e in tree[:20] if e.get('name')])
+
+        return {
+            "success": True,
+            "status": "success",
+            "message": f"UI tree: {summary[:200]}",
+            "output": tree,
+        }
+    except ImportError:
+        return {"success": False, "status": "error", "message": "uiautomation library not installed. Run: pip install uiautomation"}
+    except Exception as exc:
+        return {"success": False, "status": "error", "message": f"UI tree read failed: {exc}"}
+
+
+def click_element(name: str) -> Dict[str, Any]:
+    """Click a native Windows UI element by its Name or AutomationId."""
+    try:
+        import uiautomation as auto
+
+        root = auto.GetForegroundControl()
+        if not root:
+            return {"success": False, "status": "error", "message": "No foreground window."}
+
+        # Search by Name first, then by AutomationId
+        target = root.GetFirstChildControl(auto.NameCondition(name))
+        if not target:
+            target = root.GetFirstChildControl(auto.AutomationIdCondition(name))
+
+        if target:
+            try:
+                pattern = target.GetInvokePattern()
+                if pattern:
+                    pattern.Invoke()
+                    return {"success": True, "status": "success", "message": f"Clicked element '{name}' via Invoke."}
+            except Exception:
+                pass
+            # Fallback: click at center of the element
+            rect = target.BoundingRectangle
+            if rect:
+                cx = (rect.left + rect.right) // 2
+                cy = (rect.top + rect.bottom) // 2
+                if pyautogui:
+                    pyautogui.click(cx, cy)
+                    return {"success": True, "status": "success", "message": f"Clicked '{name}' at ({cx},{cy})."}
+            return {"success": False, "status": "error", "message": f"Found '{name}' but could not click it."}
+        return {"success": False, "status": "error", "message": f"Element '{name}' not found in the active window."}
+    except ImportError:
+        return {"success": False, "status": "error", "message": "uiautomation library not installed. Run: pip install uiautomation"}
+    except Exception as exc:
+        return {"success": False, "status": "error", "message": f"click_element failed: {exc}"}

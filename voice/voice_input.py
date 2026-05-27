@@ -79,8 +79,8 @@ class VoiceListener:
         self._buffer_lock = threading.Lock()
         
         # Ambient Wake Word Integration (Phase 20)
-        self.ambient_mode = False # Always listen (Phase 32)
-        self._listening_for_command = True
+        self.ambient_mode = True # Always listen for wake word
+        self._listening_for_command = False
         
         self._is_jarvis_speaking = False
         self._last_wake_time = 0.0  # Cooldown tracker (Phase 32)
@@ -131,8 +131,8 @@ class VoiceListener:
             import openwakeword
             from openwakeword.model import Model as OWWModel
             openwakeword.utils.download_models()
-            self._oww_model = OWWModel(wakeword_models=["hey_jarvis"], inference_framework="onnx")
-            logger.info("[VOICE] OpenWakeWord model loaded into VoiceListener.")
+            self._oww_model = OWWModel(wakeword_models=[config.WAKE_WORD], inference_framework="onnx")
+            logger.info(f"[VOICE] OpenWakeWord model '{config.WAKE_WORD}' loaded into VoiceListener.")
         except Exception as exc:
             logger.warning("[VOICE] OpenWakeWord failed to load: %s", exc)
 
@@ -220,9 +220,30 @@ class VoiceListener:
         if status:
             logger.debug("Audio status: %s", status)
 
-        # Echo Cancellation: Ignore audio while JARVIS is speaking + 500ms grace
+        # ── Voice Barge-In Detection ──────────────────────────
+        # If Jarvis is speaking and the user starts talking loudly,
+        # interrupt Jarvis immediately for a natural conversation flow.
         now = time.time()
-        if self._is_jarvis_speaking or (now - self._last_speaking_ts < 0.5):
+        if self._is_jarvis_speaking:
+            try:
+                import numpy as np
+                audio_array = np.frombuffer(bytes(indata), dtype=np.int16)
+                rms = np.sqrt(np.mean(audio_array.astype(np.float32) ** 2))
+                # Threshold tuned to ignore speaker bleed but catch real speech
+                if rms > 1500:
+                    logger.info("[VOICE] Barge-in detected (RMS=%.0f). Interrupting Jarvis.", rms)
+                    if self._event_bus:
+                        self._event_bus.emit("interrupt_tts")
+                    self._last_speaking_ts = now
+                    self._is_jarvis_speaking = False
+                    # Fall through to process this audio as a new command
+                else:
+                    return  # Normal echo cancellation — ignore quiet audio
+            except Exception:
+                return
+
+        # Echo Cancellation: Short grace period after Jarvis stops speaking
+        if now - self._last_speaking_ts < 0.3:
             return
 
         if self.ambient_mode and not self._listening_for_command:

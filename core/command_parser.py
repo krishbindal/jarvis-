@@ -14,9 +14,9 @@ from collections import deque
 from typing import Dict, List, Optional
 
 
-# ─────────────────────────────────────────────────────────
+# --------------------------------------------------------─
 # NLP Normalization (Phase 9)
-# ─────────────────────────────────────────────────────────
+# --------------------------------------------------------─
 
 _STOP_WORDS = ("please", "jarvis", "hey jarvis", "okay jarvis", "ok jarvis")
 
@@ -67,8 +67,8 @@ def split_multi_step(text: str) -> List[str]:
     """
     Phase 5: Split compound commands on natural language conjunctions.
 
-    "open chrome and search youtube" → ["open chrome", "search youtube"]
-    "open youtube then play music"   → ["open youtube", "play music"]
+    "open chrome and search youtube" => ["open chrome", "search youtube"]
+    "open youtube then play music"   => ["open youtube", "play music"]
 
     Single commands pass through unchanged as a list of one.
     """
@@ -86,18 +86,18 @@ def split_multi_step(text: str) -> List[str]:
     return [normalized] if normalized else []
 
 
-# ─────────────────────────────────────────────────────────
+# --------------------------------------------------------─
 # Session Context (Phase 6)
-# ─────────────────────────────────────────────────────────
+# --------------------------------------------------------─
 
 class SessionContext:
     """
     Tracks recent command context within a session for intelligent continuity.
 
     Examples of context-aware behavior:
-        User: "open chrome"       → last_app = "chrome"
-        User: "open youtube"      → uses chrome context → opens youtube IN chrome
-        User: "go to github.com"  → uses chrome context → opens github IN chrome
+        User: "open chrome"       => last_app = "chrome"
+        User: "open youtube"      => uses chrome context => opens youtube IN chrome
+        User: "go to github.com"  => uses chrome context => opens github IN chrome
     """
 
     def __init__(self, max_history: int = 20):
