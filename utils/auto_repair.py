@@ -8,8 +8,15 @@ import sys
 import os
 from typing import List, Dict
 from utils.logger import get_logger
+from config import ALLOW_AUTO_PIP
 
 logger = get_logger("AUTO_REPAIR")
+
+# Only known-good modules may be auto-installed, and only when opted in.
+ALLOWED_AUTO_INSTALL = {
+    "cv2", "PIL", "pyautogui", "win32clipboard", "vosk",
+    "sounddevice", "pyaudio", "psutil",
+}
 
 # Mapping of missing modules to pip packages
 PACKAGE_MAP = {
@@ -24,7 +31,13 @@ PACKAGE_MAP = {
 }
 
 def attempt_pip_install(module_name: str) -> bool:
-    """Attempts to install a missing module using pip."""
+    """Attempts to install a missing module using pip (opt-in, allow-listed)."""
+    if not ALLOW_AUTO_PIP:
+        logger.info("[AUTO-REPAIR] Skipping auto-install of %s (set JARVIS_ALLOW_AUTO_PIP=1 to enable).", module_name)
+        return False
+    if module_name not in ALLOWED_AUTO_INSTALL:
+        logger.warning("[AUTO-REPAIR] Refusing to auto-install non-allow-listed module: %s", module_name)
+        return False
     package = PACKAGE_MAP.get(module_name, module_name)
     logger.warning(f"[AUTO-REPAIR] Attempting to install missing dependency: {package}")
     

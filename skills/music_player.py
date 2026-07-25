@@ -111,8 +111,9 @@ def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
 
     # 4. Set paths
     if is_download:
-        # Download to C:\Users\krish\Downloads as requested
-        download_dir = os.path.join("C:\\", "Users", "krish", "Downloads")
+        # Download to the configured download directory (defaults to ~/Downloads)
+        from config import DOWNLOAD_DIR
+        download_dir = os.path.expanduser(DOWNLOAD_DIR)
         os.makedirs(download_dir, exist_ok=True)
         # Use query as filename
         safe_name = "".join(x if x.isalnum() or x in " -_" else "_" for x in query)

@@ -18,6 +18,7 @@ from typing import Optional
 from utils.logger import get_logger
 from utils.connectivity import is_online
 from brain.ai_engine import query_ai
+from config import ENABLE_CLIPBOARD_MONITOR
 
 logger = get_logger(__name__)
 
@@ -36,6 +37,12 @@ class ClipboardMonitor:
         self._last_content = ""
 
     def start(self) -> None:
+        if not ENABLE_CLIPBOARD_MONITOR:
+            logger.info(
+                "[CLIPBOARD] Disabled: clipboard contents are not sent to cloud LLMs. "
+                "Set JARVIS_ENABLE_CLIPBOARD_MONITOR=1 to opt in."
+            )
+            return
         if self._running:
             return
         self._running = True

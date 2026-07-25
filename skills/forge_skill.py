@@ -8,6 +8,7 @@ import re
 from typing import Dict, Any
 from utils.logger import get_logger
 from brain.ai_engine import query_ai
+from config import ALLOW_CODE_EXECUTION
 
 logger = get_logger("THE_FORGE")
 
@@ -35,6 +36,10 @@ Return ONLY the raw Python code. No markdown formatting, no backticks, no preamb
 
 def execute(target: str, extra: Dict[str, Any]) -> Dict[str, Any]:
     """Fabricate a new skill based on the target requirements."""
+    if not ALLOW_CODE_EXECUTION:
+        return {"success": False, "status": "disabled",
+                "message": "The Forge writes and registers new code; it is disabled for safety. "
+                           "Set JARVIS_ALLOW_CODE_EXECUTION=1 to enable it."}
     requirements = target or extra.get("requirements", "unspecified requirements")
     logger.info("[FORGE] Initiating fabrication for: %s", requirements)
     

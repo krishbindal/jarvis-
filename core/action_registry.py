@@ -9,14 +9,16 @@ Phase 10: Self-healing — retry with fallback chain
 Phase 14: Clean architecture — separate executor from parser
 """
 
-import os
+import sys
 import subprocess
 import logging
 import traceback
+import webbrowser
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from skills import execute_skill
+from executor.system_executor import _native_open
 
 from core.mcp_hub import get_mcp_hub
 
@@ -77,7 +79,7 @@ def _chat_handler(target: str) -> Dict[str, Any]:
 def _system_check_handler(target: str) -> Dict[str, Any]:
     """Execute the Sentinel Protocol (Master Diagnostic)."""
     try:
-        res = subprocess.check_output("python jarvis_master_check.py", shell=True, stderr=subprocess.STDOUT, text=True)
+        res = subprocess.check_output([sys.executable, "jarvis_master_check.py"], stderr=subprocess.STDOUT, text=True)
         # Parse for the "STATUS" line to give a clean message
         status_line = [line for line in res.split('\n') if "STATUS:" in line]
         msg = status_line[0] if status_line else "Diagnostic completed."
@@ -101,18 +103,19 @@ def _open_dynamic_handler(target: str, extra: Optional[Dict] = None) -> Dict[str
 
     attempts = []
 
-    # -- Attempt 1: Open with specified app --------------------
+    # -- Attempt 1: Open with specified app (no shell) ---------
     if app:
         try:
             logger.info("[EXEC] Attempt 1: Opening %s '%s' in '%s'", resolved_type, target, app)
             if app in ("chrome", "msedge", "firefox", "brave", "opera"):
-                subprocess.Popen(f'start {app} "{target}"', shell=True)
+                try:
+                    webbrowser.get(app).open(target)
+                except Exception:
+                    webbrowser.open(target)
             elif app in ("code",):
-                subprocess.Popen(f'code "{target}"', shell=True)
-            elif app in ("explorer",):
-                subprocess.Popen(f'explorer "{target}"', shell=True)
+                subprocess.Popen(["code", target])
             else:
-                subprocess.Popen(f'start {app} "{target}"', shell=True)
+                _native_open(target)
 
             return {"success": True, "status": "success",
                     "message": f"Opening {target} in {app}", "output": target}
@@ -120,25 +123,15 @@ def _open_dynamic_handler(target: str, extra: Optional[Dict] = None) -> Dict[str
             attempts.append(f"App launch failed ({app}): {exc}")
             logger.warning("[EXEC] Attempt 1 failed: %s", exc)
 
-    # -- Attempt 2: System default (start "" "target") --------─
+    # -- Attempt 2: System default handler (no shell) ----------
     try:
         logger.info("[EXEC] Attempt 2: Opening '%s' with system default", target)
-        subprocess.Popen(f'start "" "{target}"', shell=True)
+        _native_open(target)
         return {"success": True, "status": "success",
                 "message": f"Opening {target}", "output": target}
     except Exception as exc:
-        attempts.append(f"System start failed: {exc}")
-        logger.warning("[EXEC] Attempt 2 failed: %s", exc)
-
-    # -- Attempt 3: os.startfile fallback ----------------------
-    try:
-        logger.info("[EXEC] Attempt 3: os.startfile fallback for '%s'", target)
-        os.startfile(target)
-        return {"success": True, "status": "success",
-                "message": f"Opened {target} (fallback)", "output": target}
-    except Exception as exc:
-        attempts.append(f"os.startfile failed: {exc}")
-        logger.error("[EXEC] All 3 attempts failed for '%s': %s", target, attempts)
+        attempts.append(f"System open failed: {exc}")
+        logger.error("[EXEC] All attempts failed for '%s': %s", target, attempts)
 
     return {
         "success": False, "status": "error",
@@ -153,23 +146,15 @@ def _open_url_handler(target: str) -> Dict[str, Any]:
 
 
 def _open_folder_handler(target: str) -> Dict[str, Any]:
-    """Open a folder with self-healing fallback."""
+    """Open a folder with the OS default file manager (no shell)."""
     path = Path(target).expanduser().resolve()
     try:
-        if path.exists():
-            os.startfile(str(path))
-        else:
-            subprocess.Popen(f'explorer "{path}"', shell=True)
+        _native_open(str(path))
         return {"success": True, "status": "success",
                 "message": f"Opening folder: {path}", "output": str(path)}
     except Exception as exc:
-        logger.warning("[EXEC] Folder open failed, trying explorer: %s", exc)
-        try:
-            subprocess.Popen(f'explorer "{path}"', shell=True)
-            return {"success": True, "status": "success",
-                    "message": f"Opening folder: {path} (fallback)", "output": str(path)}
-        except Exception as exc2:
-            return {"success": False, "status": "error", "message": str(exc2)}
+        logger.warning("[EXEC] Folder open failed: %s", exc)
+        return {"success": False, "status": "error", "message": str(exc)}
 
 
 # ----------------------------------------------------------─

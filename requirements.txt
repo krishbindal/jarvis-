@@ -18,3 +18,5 @@ python-dotenv>=1.0
 winotify>=1.0; platform_system == "Windows"
 openwakeword>=0.6
 playwright>=1.40
+duckduckgo-search>=5.0
+uiautomation>=2.0; platform_system == "Windows"

@@ -28,14 +28,40 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 # n8n Integration
 N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "http://localhost:5678/webhook/action")
-N8N_NOTIFY_PORT = 5001  # Internal port for n8n to JARVIS communication
+N8N_NOTIFY_HOST = os.getenv("N8N_NOTIFY_HOST", "127.0.0.1")  # Loopback only by default
+N8N_NOTIFY_PORT = int(os.getenv("N8N_NOTIFY_PORT", "5001"))  # Internal port for n8n to JARVIS communication
+# Shared secret required to accept inbound notifications. Empty => server disabled.
+N8N_NOTIFY_TOKEN = os.getenv("N8N_NOTIFY_TOKEN", "")
+
 SAFE_DIRECTORIES = [
     os.path.expanduser("~/Downloads"),
     os.path.expanduser("~/Desktop"),
     os.path.expanduser("~/Documents"),
-    "C:/Users"
 ]
 REQUEST_TIMEOUT = 10
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    """Parse a boolean environment flag (1/true/yes/on)."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+# Security controls (opt-in for dangerous capabilities)
+# When False, file operations are confined to SAFE_DIRECTORIES.
+ALLOW_UNRESTRICTED_FS = _env_flag("JARVIS_ALLOW_UNRESTRICTED_FS", False)
+# When False, LLM-generated / dynamic code is NOT executed automatically.
+ALLOW_CODE_EXECUTION = _env_flag("JARVIS_ALLOW_CODE_EXECUTION", False)
+# When False, clipboard contents are not sent to cloud LLMs.
+ENABLE_CLIPBOARD_MONITOR = _env_flag("JARVIS_ENABLE_CLIPBOARD_MONITOR", False)
+# When False, auto pip-install of missing modules is disabled.
+ALLOW_AUTO_PIP = _env_flag("JARVIS_ALLOW_AUTO_PIP", False)
+
+# Downloads
+DOWNLOAD_DIR = os.getenv("JARVIS_DOWNLOAD_DIR", os.path.expanduser("~/Downloads"))
+MAX_DOWNLOAD_BYTES = int(os.getenv("JARVIS_MAX_DOWNLOAD_BYTES", str(500 * 1024 * 1024)))  # 500 MB
 
 # Communication (Gmail Defaults)
 EMAIL_USER = os.getenv("EMAIL_USER", "your-email@gmail.com")

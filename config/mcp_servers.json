@@ -9,14 +9,14 @@
     "mock-server": {
       "command": "python",
       "args": ["test_mcp_mock_server.py"],
-      "enabled": true,
+      "enabled": false,
       "description": "Local mock server for integration testing."
     },
     "open-interpreter": {
       "command": "py",
       "args": ["-3.12", "-m", "interpreter", "--mcp"],
-      "enabled": true,
-      "description": "Open Interpreter for universal system and code execution (via Python 3.12)."
+      "enabled": false,
+      "description": "Open Interpreter for universal system and code execution (via Python 3.12). DANGEROUS: enable only if you fully trust every input Jarvis processes."
     }
   }
 }

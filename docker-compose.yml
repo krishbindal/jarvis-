@@ -6,19 +6,20 @@ services:
     container_name: jarvis_n8n
     restart: always
     ports:
-      - "5678:5678"
+      # Bind to loopback only so n8n is never exposed on the network.
+      - "127.0.0.1:5678:5678"
     environment:
-      - N8N_HOST=0.0.0.0
+      - N8N_HOST=localhost
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
       - NODE_ENV=production
       - WEBHOOK_URL=http://localhost:5678/
       - GENERIC_TIMEZONE=Asia/Kolkata
-      # Set to true to disable authentication for easy local integration. 
-      # WARNING: Do not expose this port to the internet.
-      - N8N_USER_MANAGEMENT_DISABLED=true
-      - N8N_BASIC_AUTH_ACTIVE=false
-      - N8N_SECURE_COOKIE=false
+      # Authentication is enabled. Provide credentials via a .env file next to
+      # this compose file (see .env.example). Do NOT disable auth.
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
     volumes:
       - n8n_data:/home/node/.n8n
 

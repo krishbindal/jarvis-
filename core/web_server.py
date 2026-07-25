@@ -5,18 +5,40 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import TYPE_CHECKING
 from utils.logger import get_logger
-from config import N8N_NOTIFY_PORT
+from config import N8N_NOTIFY_HOST, N8N_NOTIFY_PORT, N8N_NOTIFY_TOKEN
 
 if TYPE_CHECKING:
     from utils.events import EventBus
 
 logger = get_logger(__name__)
 
+MAX_NOTIFY_BODY = 64 * 1024  # 64 KB cap on inbound payloads
+
+
 class N8NNotificationHandler(BaseHTTPRequestHandler):
+    def _authorized(self) -> bool:
+        """Require a matching shared-secret token on every request."""
+        import hmac
+        expected = getattr(self.server, "auth_token", "")
+        if not expected:
+            return False
+        provided = self.headers.get("X-Jarvis-Token", "")
+        return hmac.compare_digest(provided, expected)
+
     def do_POST(self):
         """Handle incoming notifications from n8n."""
         try:
-            content_length = int(self.headers['Content-Length'])
+            if not self._authorized():
+                logger.warning("[WEB-SERVER] Rejected unauthorized notification request.")
+                self.send_response(401)
+                self.end_headers()
+                return
+
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length <= 0 or content_length > MAX_NOTIFY_BODY:
+                self.send_response(413)
+                self.end_headers()
+                return
             post_data = self.rfile.read(content_length)
             payload = json.loads(post_data)
             
@@ -52,11 +74,22 @@ class JarvisWebServer:
         self.thread: threading.Thread | None = None
 
     def start(self):
+        if not N8N_NOTIFY_TOKEN:
+            logger.warning(
+                "[WEB-SERVER] Disabled: set N8N_NOTIFY_TOKEN to enable the local "
+                "notification server (it is off by default to prevent unauthenticated access)."
+            )
+            return
+
         def _run():
             try:
-                self.server = HTTPServer(('localhost', N8N_NOTIFY_PORT), N8NNotificationHandler)
+                self.server = HTTPServer((N8N_NOTIFY_HOST, N8N_NOTIFY_PORT), N8NNotificationHandler)
                 self.server.event_bus = self.event_bus
-                logger.info("[WEB-SERVER] Listening for n8n notifications on port %d", N8N_NOTIFY_PORT)
+                self.server.auth_token = N8N_NOTIFY_TOKEN
+                logger.info(
+                    "[WEB-SERVER] Listening for n8n notifications on %s:%d (token required)",
+                    N8N_NOTIFY_HOST, N8N_NOTIFY_PORT,
+                )
                 self.server.serve_forever()
             except Exception as exc:
                 logger.error("[WEB-SERVER] Server failed: %s", exc)
