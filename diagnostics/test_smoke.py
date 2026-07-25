@@ -49,13 +49,13 @@ def run_tests():
             return (result.get("extra") or {}).get(key)
         return None
 
-    # ═══════════════════════════════════════════
+    # ===========================================
     print("=" * 70)
-    print("  JARVIS-X Advanced Intelligence Upgrade — Test Suite")
+    print("  JARVIS-X Advanced Intelligence Upgrade - Test Suite")
     print("=" * 70)
 
-    # ── PHASE 1: Universal Command Parsing ────────────────────
-    print("\n  ─── Phase 1: Universal Command Parsing ───")
+    # --- PHASE 1: Universal Command Parsing --------------------
+    print("\n  --- Phase 1: Universal Command Parsing ---")
     check("open youtube",              "open_dynamic",  action_of(route_command("open youtube")))
     check("open github.com",           "open_dynamic",  action_of(route_command("open github.com")))
     check("open report.pdf",           "open_dynamic",  action_of(route_command("open report.pdf")))
@@ -63,39 +63,39 @@ def run_tests():
     check("play music",                "skill:music",    action_of(route_command("play music")))
     check("run workflow backup",       "skill:system_agent", action_of(route_command("run workflow backup")))
 
-    # ── PHASE 2: Target Intelligence ──────────────────────────
-    print("\n  ─── Phase 2: Target Intelligence ───")
+    # --- PHASE 2: Target Intelligence --------------------------
+    print("\n  --- Phase 2: Target Intelligence ---")
     r = route_command("open google.com")
-    check("google.com → url type",     "url",    extra_of(r, "resolved_type"))
+    check("google.com -> url type",     "url",    extra_of(r, "resolved_type"))
     r = route_command("open report.pdf")
-    check("report.pdf → file type",    "file",   extra_of(r, "resolved_type"))
+    check("report.pdf -> file type",    "file",   extra_of(r, "resolved_type"))
     check("open downloads folder",     "open_folder", action_of(route_command("open downloads folder")))
     check("open some random thing",    "open_app",    action_of(route_command("open some random thing")))
 
-    # ── PHASE 3: Smart URL Handling ───────────────────────────
-    print("\n  ─── Phase 3: Smart URL Handling ───")
+    # --- PHASE 3: Smart URL Handling ---------------------------
+    print("\n  --- Phase 3: Smart URL Handling ---")
     r = route_command("open youtube")
-    check("youtube → youtube.com",     True,  "youtube.com" in r.get("target", ""))
+    check("youtube -> youtube.com",     True,  "youtube.com" in r.get("target", ""))
     r = route_command("open google")
-    check("google → google.com",       True,  "google.com" in r.get("target", ""))
+    check("google -> google.com",       True,  "google.com" in r.get("target", ""))
     r = route_command("open stackoverflow")
-    check("stackoverflow → SO url",    True,  "stackoverflow.com" in r.get("target", ""))
+    check("stackoverflow -> SO url",    True,  "stackoverflow.com" in r.get("target", ""))
 
-    # ── PHASE 4: Execution Engine ─────────────────────────────
-    print("\n  ─── Phase 4: Execution Engine ───")
+    # --- PHASE 4: Execution Engine -----------------------------
+    print("\n  --- Phase 4: Execution Engine ---")
     r = route_command("open youtube on chrome")
-    check("open youtube on chrome → open_dynamic", "open_dynamic", action_of(r))
+    check("open youtube on chrome -> open_dynamic", "open_dynamic", action_of(r))
     check("  app = chrome",           "chrome", extra_of(r, "app"))
     r = route_command("open github in edge")
-    check("open github in edge → open_dynamic", "open_dynamic", action_of(r))
+    check("open github in edge -> open_dynamic", "open_dynamic", action_of(r))
     check("  app = msedge",           "msedge", extra_of(r, "app"))
     r = route_command("open notes.txt in vscode")
     check("open notes.txt in vscode", "open_dynamic", action_of(r))
     check("  app = code",             "code",   extra_of(r, "app"))
     check("  type = file",            "file",   extra_of(r, "resolved_type"))
 
-    # ── PHASE 5: Multi-Step Command Support ───────────────────
-    print("\n  ─── Phase 5: Multi-Step Commands ───")
+    # --- PHASE 5: Multi-Step Command Support -------------------
+    print("\n  --- Phase 5: Multi-Step Commands ---")
     steps = split_multi_step("open chrome and search youtube")
     check("split 'open chrome and search youtube'", 2, len(steps))
     check("  step 1 = open chrome",     "open chrome",     steps[0] if len(steps) > 0 else "")
@@ -116,8 +116,8 @@ def run_tests():
     steps = split_multi_step("open youtube")
     check("single command stays single", 1, len(steps))
 
-    # ── PHASE 6: Context Awareness ────────────────────────────
-    print("\n  ─── Phase 6: Context Awareness ───")
+    # --- PHASE 6: Context Awareness ----------------------------
+    print("\n  --- Phase 6: Context Awareness ---")
     ctx = SessionContext()
     ctx.record("open_dynamic", "youtube", app="chrome")
     check("context: last_app = chrome", "chrome", ctx.last_app)
@@ -128,8 +128,8 @@ def run_tests():
     ctx.clear()
     check("context: clear resets",      None, ctx.last_app)
 
-    # ── PHASE 9: Command Normalization ────────────────────────
-    print("\n  ─── Phase 9: Normalization ───")
+    # --- PHASE 9: Command Normalization ------------------------
+    print("\n  --- Phase 9: Normalization ---")
     check("strip 'please'",         "open youtube",  normalize("please open youtube"))
     check("strip 'can you'",        "open youtube",  normalize("can you open youtube"))
     check("strip 'jarvis'",         "open youtube",  normalize("jarvis open youtube"))
@@ -138,8 +138,8 @@ def run_tests():
     check("lowercase + collapse",   "open my files", normalize("  OPEN  MY  FILES  "))
     check("strip 'i want to'",      "open chrome",   normalize("i want to open chrome"))
 
-    # ── PHASE 11: Performance Caching ─────────────────────────
-    print("\n  ─── Phase 11: Caching ───")
+    # --- PHASE 11: Performance Caching -------------------------
+    print("\n  --- Phase 11: Caching ---")
     cache = CommandCache(max_size=10, ttl_seconds=60)
     cache.put("test_key", {"action": "open_dynamic", "target": "test"})
     check("cache hit",              "open_dynamic", (cache.get("test_key") or {}).get("action"))
@@ -148,43 +148,43 @@ def run_tests():
     check("cache stats: 1 hit",    1, stats["hits"])
     check("cache stats: 1 miss",   1, stats["misses"])
 
-    # ── Greetings ─────────────────────────────────────────────
-    print("\n  ─── Greetings ───")
+    # --- Greetings ---------------------------------------------
+    print("\n  --- Greetings ---")
     for g in ("hi", "hello", "how are you", "thanks", "good morning", "bye", "yo", "hola"):
         check(f"greeting: {g}", "chat", action_of(route_command(g)))
 
-    # ── Navigation ────────────────────────────────────────────
-    print("\n  ─── Navigation ───")
+    # --- Navigation --------------------------------------------
+    print("\n  --- Navigation ---")
     check("go to downloads",        "open_folder",  action_of(route_command("go to downloads")))
     check("take me to desktop",     "open_folder",  action_of(route_command("take me to desktop")))
     check("navigate to documents",  "open_folder",  action_of(route_command("navigate to documents")))
     check("now go to downloads",    "open_folder",  action_of(route_command("now go to downloads")))
 
-    # ── Media ─────────────────────────────────────────────────
-    print("\n  ─── Media Controls ───")
+    # --- Media -------------------------------------------------
+    print("\n  --- Media Controls ---")
     check("pause music",    "skill:music",   action_of(route_command("pause music")))
     check("skip this song", "media_control", action_of(route_command("skip this song")))
     check("volume up",      "media_control", action_of(route_command("volume up")))
     check("mute",           "media_control", action_of(route_command("mute")))
 
-    # ── Power ─────────────────────────────────────────────────
-    print("\n  ─── Power Controls ───")
+    # --- Power -------------------------------------------------
+    print("\n  --- Power Controls ---")
     check("lock computer",  "power_state", action_of(route_command("lock computer")))
 
-    # ── Screen ────────────────────────────────────────────────
-    print("\n  ─── Screen ───")
+    # --- Screen ------------------------------------------------
+    print("\n  --- Screen ---")
     check("take screenshot", "capture_screen", action_of(route_command("take screenshot")))
 
-    # ── Search ────────────────────────────────────────────────
-    print("\n  ─── Search ───")
+    # --- Search ------------------------------------------------
+    print("\n  --- Search ---")
     check("search for python tips",  "skill:browser", action_of(route_command("search for python tips")))
     check("what is machine learning", "quick_search", action_of(route_command("what is machine learning")))
 
-    # ── Fallback ──────────────────────────────────────────────
-    print("\n  ─── Fallback ───")
-    check("unknown → AI fallback",  "skill:system_agent", action_of(route_command("asdjkfhaskjdfh")))
+    # --- Fallback ----------------------------------------------
+    print("\n  --- Fallback ---")
+    check("unknown -> AI fallback",  "skill:system_agent", action_of(route_command("asdjkfhaskjdfh")))
 
-    # ═══════════════════════════════════════════
+    # ===========================================
     print()
     print("=" * 70)
     total = passed + failed
