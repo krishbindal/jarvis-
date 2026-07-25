@@ -97,6 +97,15 @@ def execute_python(code: str) -> Dict[str, Any]:
     import tempfile
     import subprocess
     import os
+    from config import ALLOW_CODE_EXECUTION
+
+    if not ALLOW_CODE_EXECUTION:
+        return {
+            "success": False,
+            "status": "disabled",
+            "message": "Python code execution is disabled for safety. "
+                       "Set JARVIS_ALLOW_CODE_EXECUTION=1 to enable it.",
+        }
 
     workspace = os.path.join(tempfile.gettempdir(), "jarvis_sandbox")
     os.makedirs(workspace, exist_ok=True)

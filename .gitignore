@@ -40,3 +40,6 @@ n8n_workflows/Community_Library/
 
 # Scratch files
 scratch/
+
+# Local contacts (PII) — use data/contacts.example.json as a template
+data/contacts.json

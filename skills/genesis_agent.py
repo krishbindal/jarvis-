@@ -7,7 +7,7 @@ import os
 import re
 from typing import Any, Dict
 from utils.logger import get_logger
-from config import GROQ_API_KEY
+from config import GROQ_API_KEY, ALLOW_CODE_EXECUTION
 import sys
 import importlib
 
@@ -38,6 +38,10 @@ Make the code flawless. If it needs external standard libraries like requests, j
 
 def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
     """Generates a new python skill using Groq, saves it, and hot reloads."""
+    if not ALLOW_CODE_EXECUTION:
+        return {"success": False, "status": "disabled",
+                "message": "Genesis Mode writes and loads new code; it is disabled for safety. "
+                           "Set JARVIS_ALLOW_CODE_EXECUTION=1 to enable it."}
     if not GROQ_API_KEY:
         return {"success": False, "status": "error", "message": "Genesis mode requires GROQ_API_KEY to write high-speed code."}
 

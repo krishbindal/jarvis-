@@ -10,9 +10,14 @@ import tempfile
 from typing import Any, Dict
 
 from utils.logger import get_logger
-from config import GROQ_API_KEY, GEMINI_API_KEY
+from config import GROQ_API_KEY, GEMINI_API_KEY, ALLOW_CODE_EXECUTION
 
 logger = get_logger(__name__)
+
+_CODE_EXEC_DISABLED_MSG = (
+    "Dynamic code execution is disabled for safety. "
+    "Set JARVIS_ALLOW_CODE_EXECUTION=1 to enable it."
+)
 
 SKILL_NAME = "system_agent"
 SKILL_DESCRIPTION = "Agentic system control — download files, convert formats, execute scripts"
@@ -80,6 +85,9 @@ def _generate_code(intent: str) -> str:
 def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
     """Dynamically generate and execute a script to fulfill the intent."""
     logger.info(f"[SYSTEM_AGENT] Goal: {target}")
+    if not ALLOW_CODE_EXECUTION:
+        logger.warning("[SYSTEM_AGENT] Blocked: code execution disabled.")
+        return {"success": False, "status": "disabled", "message": _CODE_EXEC_DISABLED_MSG}
     try:
         # Generate the Python script
         code = _generate_code(target)

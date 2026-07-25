@@ -3,13 +3,15 @@ from __future__ import annotations
 """File system executor with safety checks."""
 
 import os
+import re
 import shutil
 import subprocess
+import sys
 import difflib
 from pathlib import Path
 from typing import Dict, List
 
-from config import SAFE_DIRECTORIES
+from config import SAFE_DIRECTORIES, ALLOW_UNRESTRICTED_FS
 from utils.logger import get_logger
 
 try:
@@ -21,24 +23,70 @@ except Exception as exc:  # noqa: BLE001
 
 logger = get_logger(__name__)
 
+IS_WINDOWS = os.name == "nt"
+
+
+class UnsafePathError(PermissionError):
+    """Raised when a file operation targets a path outside the allow-list."""
+
 
 def _allowed_roots() -> List[Path]:
-    return [Path(p).expanduser().resolve() for p in SAFE_DIRECTORIES]
+    roots = []
+    for p in SAFE_DIRECTORIES:
+        try:
+            roots.append(Path(p).expanduser().resolve())
+        except Exception:  # noqa: BLE001
+            continue
+    return roots
 
 
 def _is_safe(path: Path) -> bool:
-    # PERMISSION OVERRIDE: Unrestricted C: drive access enabled by user request.
-    return True
+    """Return True only if `path` is inside an allowed root (unless unrestricted)."""
+    if ALLOW_UNRESTRICTED_FS:
+        return True
+    try:
+        resolved = path.expanduser().resolve()
+    except Exception:  # noqa: BLE001
+        return False
+    for root in _allowed_roots():
+        try:
+            resolved.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
 
 
 def _safe_path(raw: str) -> Path:
+    """Resolve a path and enforce the allow-list."""
     resolved = Path(raw).expanduser().resolve()
+    if not _is_safe(resolved):
+        raise UnsafePathError(
+            f"Path '{resolved}' is outside the allowed directories. "
+            f"Set JARVIS_ALLOW_UNRESTRICTED_FS=1 to override."
+        )
     return resolved
 
 
 def _default_dir() -> Path:
-    # Default to C:\ root if unrestricted fallback is needed, else current dir
-    return Path("C:\\").resolve()
+    roots = _allowed_roots()
+    if roots:
+        return roots[0]
+    return Path.home()
+
+
+def _native_open(target: str) -> None:
+    """Open a file/URL/URI with the OS default handler without a shell.
+
+    Uses ShellExecute-style launching so `target` is never parsed by a shell,
+    eliminating command-injection via metacharacters.
+    """
+    if IS_WINDOWS:
+        os.startfile(target)  # type: ignore[attr-defined]  # noqa: B606
+    elif sys.platform == "darwin":
+        subprocess.run(["open", target], check=True)
+    else:
+        subprocess.run(["xdg-open", target], check=True)
 
 
 def list_files(path: str) -> Dict:
@@ -144,19 +192,22 @@ def search_file(name: str, root_path: str = "") -> Dict:
     try:
         # Phase 16: Optimization for low-end PCs
         # Default to user profile to avoid scanning System32/Program Files
-        search_root = os.environ.get("USERPROFILE", "C:\\Users")
+        search_root = os.environ.get("USERPROFILE") or str(Path.home())
         if root_path:
             search_root = str(_safe_path(root_path))
 
         logger.info("[SYSTEM] Fast-searching for '%s' in %s", name, search_root)
-        
-        # 'where /r <path> <pattern>' is much faster than python's rglob
-        # We use *name* to allow partial matching
-        cmd = f'where /r "{search_root}" "*{name}*"'
-        
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=20)
-        
-        matches = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+        if IS_WINDOWS:
+            # 'where /r <path> <pattern>' is much faster than python's rglob.
+            # Passed as an argument list (no shell) to avoid command injection.
+            result = subprocess.run(
+                ["where", "/r", search_root, f"*{name}*"],
+                capture_output=True, text=True, timeout=20,
+            )
+            matches = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        else:
+            matches = [str(p) for p in Path(search_root).rglob(f"*{name}*")]
         matches = matches[:25] # Limit results for UI clarity
 
         if not matches:
@@ -246,25 +297,35 @@ def kill_process(target: str) -> Dict:
     if target_clean == "explorer":
         return {"success": False, "status": "protected", "message": "Sir, I cannot terminate Explorer as it would crash the Windows shell."}
 
+    # Only allow a plain process name (letters, digits, _, -, .) to reach the OS.
+    if not re.fullmatch(r"[A-Za-z0-9_.\- ]+", target_clean):
+        return {"success": False, "status": "error", "message": "Invalid process name."}
+
     logger.info("Jarvis is terminating process: %s", target_clean)
-    
+
     try:
-        # Use taskkill /F (Force) /IM (Image Name) /T (Tree)
-        cmd = f'taskkill /F /IM "{target_clean}.exe" /T'
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-        
-        if result.returncode == 0:
-            return {"success": True, "status": "success", "message": f"Sir, I have terminated {target_clean}.", "output": result.stdout}
-        elif "not found" in result.stderr.lower():
-            # Try without .exe
-            cmd_alt = f'taskkill /F /IM "{target_clean}" /T'
-            result_alt = subprocess.run(cmd_alt, shell=True, capture_output=True, text=True)
-            if result_alt.returncode == 0:
-                return {"success": True, "status": "success", "message": f"Sir, I have terminated {target_clean}.", "output": result_alt.stdout}
-            
-            return {"success": False, "status": "not_running", "message": f"Sir, {target_clean} is not currently running.", "output": result.stderr}
-        else:
+        if IS_WINDOWS:
+            # Argument list (no shell) => no command injection.
+            result = subprocess.run(
+                ["taskkill", "/F", "/IM", f"{target_clean}.exe", "/T"],
+                capture_output=True, text=True,
+            )
+            if result.returncode == 0:
+                return {"success": True, "status": "success", "message": f"Sir, I have terminated {target_clean}.", "output": result.stdout}
+            if "not found" in result.stderr.lower():
+                result_alt = subprocess.run(
+                    ["taskkill", "/F", "/IM", target_clean, "/T"],
+                    capture_output=True, text=True,
+                )
+                if result_alt.returncode == 0:
+                    return {"success": True, "status": "success", "message": f"Sir, I have terminated {target_clean}.", "output": result_alt.stdout}
+                return {"success": False, "status": "not_running", "message": f"Sir, {target_clean} is not currently running.", "output": result.stderr}
             return {"success": False, "status": "error", "message": f"Failed to kill {target_clean}: {result.stderr}", "output": result.stderr}
+        else:
+            result = subprocess.run(["pkill", "-f", target_clean], capture_output=True, text=True)
+            if result.returncode == 0:
+                return {"success": True, "status": "success", "message": f"Terminated {target_clean}.", "output": result.stdout}
+            return {"success": False, "status": "not_running", "message": f"{target_clean} is not currently running.", "output": result.stderr}
     except Exception as exc:
         return {"success": False, "status": "error", "message": str(exc)}
 
@@ -282,11 +343,12 @@ def open_app(target: str) -> Dict:
         return {"success": True, "status": "success", "message": "Opening Start Menu", "output": "WIN_KEY"}
 
     logger.info("Opening %s via system executor", target_lower)
-    
-    # Special Case: Chrome
+
+    # Special Case: Chrome (launch via webbrowser, no shell)
     if target_lower == "chrome":
         try:
-            subprocess.Popen("start chrome", shell=True)
+            import webbrowser
+            webbrowser.open("about:blank")
             return {"success": True, "status": "success", "message": "Chrome launched", "output": "Chrome launched"}
         except Exception:
             pass
@@ -304,13 +366,15 @@ def open_app(target: str) -> Dict:
         requested_uri = uri_map[target_lower]
         logger.info(f"Target found in URI map: {target_lower} -> {requested_uri}")
         try:
-            subprocess.run(f'start "" "{requested_uri}"', shell=True, check=True)
+            _native_open(requested_uri)
             return {"success": True, "status": "success", "message": f"{target_lower} launched (native)", "output": requested_uri}
         except Exception as e:
             logger.warning(f"URI launch failed for {requested_uri}, falling back to shortcut scan: {e}")
 
-    # Universal Windows App Scanner
+    # Universal Windows App Scanner (Windows-only)
     try:
+        if not IS_WINDOWS:
+            raise FileNotFoundError("Start Menu scan is Windows-only")
         common_start = Path(os.environ.get('ALLUSERSPROFILE', 'C:\\ProgramData')) / 'Microsoft\\Windows\\Start Menu\\Programs'
         user_start = Path(os.environ.get('APPDATA', '')) / 'Microsoft\\Windows\\Start Menu\\Programs'
         app_paths = {}
@@ -341,22 +405,24 @@ def open_app(target: str) -> Dict:
     except Exception as e:
         logger.error("Failed scanning installed apps: %s", e)
 
-    # Generic start fallback
+    # Generic fallback: hand target to the OS default handler (no shell).
     try:
-        # Final attempt: direct shell start (handles URLs or in-PATH executables)
-        subprocess.run(f'start "" "{target_lower}"', shell=True, check=True, stderr=subprocess.DEVNULL)
+        _native_open(target_lower)
         return {"success": True, "status": "success", "message": f"Launched {target_lower}", "output": target_lower}
     except Exception as exc:
         # Last ditch: try as a URI if not already tried
         if target_lower not in uri_map:
             try:
-                subprocess.run(f'start "" "{target_lower}:"', shell=True, check=True, stderr=subprocess.DEVNULL)
+                _native_open(f"{target_lower}:")
                 return {"success": True, "status": "success", "message": f"Launched {target_lower} as URI", "output": f"{target_lower}:"}
             except Exception:
                 pass
         return {"success": False, "status": "error", "message": str(exc)}
 
-import ctypes
+try:
+    import ctypes
+except Exception:  # noqa: BLE001
+    ctypes = None
 
 def media_control(action: str) -> Dict:
     # Virtual-Key Codes for media
@@ -366,21 +432,26 @@ def media_control(action: str) -> Dict:
         "mute": 0xAD, "volume_down": 0xAE, "volume_up": 0xAF
     }
     action_key = action.lower()
-    if action_key in vk_media:
-        vk_code = vk_media[action_key]
-        ctypes.windll.user32.keybd_event(vk_code, 0, 0, 0)
-        ctypes.windll.user32.keybd_event(vk_code, 0, 2, 0)
-        return {"success": True, "status": "success", "message": f"Media action executing: {action}", "output": f"Sent VK {vk_code}"}
-    return {"success": False, "status": "error", "message": f"Unknown media action: {action}"}
+    if action_key not in vk_media:
+        return {"success": False, "status": "error", "message": f"Unknown media action: {action}"}
+    if not IS_WINDOWS or ctypes is None:
+        return {"success": False, "status": "unsupported", "message": "Media control is only supported on Windows."}
+    vk_code = vk_media[action_key]
+    ctypes.windll.user32.keybd_event(vk_code, 0, 0, 0)
+    ctypes.windll.user32.keybd_event(vk_code, 0, 2, 0)
+    return {"success": True, "status": "success", "message": f"Media action executing: {action}", "output": f"Sent VK {vk_code}"}
 
 def power_state(action: str) -> Dict:
     action_key = action.lower()
+    if not IS_WINDOWS or ctypes is None:
+        return {"success": False, "status": "unsupported", "message": "Power control is only supported on Windows."}
     try:
         if action_key == "lock":
             ctypes.windll.user32.LockWorkStation()
             return {"success": True, "status": "success", "message": "Workstation locked"}
         elif action_key == "sleep":
-            subprocess.run("rundll32.exe powrprof.dll,SetSuspendState 0,1,0", shell=True)
+            # Argument list (no shell) => no command injection.
+            subprocess.run(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"])
             return {"success": True, "status": "success", "message": "Putting computer to sleep"}
         return {"success": False, "status": "error", "message": f"Unknown power action: {action}"}
     except Exception as exc:
@@ -414,8 +485,11 @@ def capture_screen(target: str = "") -> Dict:
 def run_system_check(target: str = "") -> Dict:
     """Trigger the Sentinel Protocol (Master Diagnostic)."""
     try:
-        # We run it via subprocess to ensure a fresh environment
-        res = subprocess.check_output(f"python jarvis_master_check.py", shell=True, stderr=subprocess.STDOUT, text=True)
+        # Run via the current interpreter as an argument list (no shell).
+        res = subprocess.check_output(
+            [sys.executable, "jarvis_master_check.py"],
+            stderr=subprocess.STDOUT, text=True,
+        )
         return {"success": True, "status": "success", "message": "Master Diagnostic complete.", "output": res}
     except Exception as exc:
         return {"success": False, "status": "error", "message": f"Diagnostic tool failed: {str(exc)}"}
