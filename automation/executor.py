@@ -17,6 +17,7 @@ from executor import agent_tools
 from executor.download_executor import download_file, download_video
 from utils.logger import get_logger
 from core.action_registry import execute_action
+from core.action_policy import check_action
 
 logger = get_logger(__name__)
 
@@ -73,6 +74,11 @@ def _execute_step(step: AutomationStep, context_state=None) -> Dict[str, Any]:
         res["resolved_target"] = resolved
         res["app_used"] = app_choice
         return res
+
+    if action in ("click", "type", "download"):
+        denied = check_action("automation:" + action, target or step.reason)
+        if denied is not None:
+            return denied
 
     if action == "click":
         return agent_tools.click(step.reason or target)
