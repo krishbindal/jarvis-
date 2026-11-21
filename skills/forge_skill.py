@@ -1,81 +1,51 @@
-"""
-JARVIS-X Phase 26: The Forge (Skill Fabricator)
-An out-of-the-box skill that allows Jarvis to write and register new skills for himself.
-"""
+"""The Forge: skill candidate generator, without automatic code execution."""
+from __future__ import annotations
 
-import os
-import re
-from typing import Dict, Any
-from utils.logger import get_logger
+from typing import Any, Dict
 from brain.ai_engine import query_ai
-from config import ALLOW_CODE_EXECUTION
+from config import ENABLE_SKILL_GENERATION
+from skills.skill_staging import extract_skill_name, stage_skill_candidate
+from utils.logger import get_logger
 
-logger = get_logger("THE_FORGE")
-
+logger = get_logger(__name__)
 SKILL_NAME = "forge"
-SKILL_DESCRIPTION = "Allows Jarvis to autonomously create and register new skills for himself."
+SKILL_DESCRIPTION = "Draft a skill for manual review, not installation"
 SKILL_PATTERNS = [
     r"(?:create|fabricate|forge|make) (?:a )?new skill for (.+)",
     r"i (?:need|want) a skill to (.+)",
-    r"build a skill that (.+)"
+    r"build a skill that (.+)",
 ]
 
-FORGE_PROMPT_TEMPLATE = """
-You are the JARVIS-X Core Fabricator. Create a Python skill module for the following requirements:
-{requirements}
-
-The module MUST include exactly:
-1. SKILL_NAME: a unique snake_case string.
-2. SKILL_DESCRIPTION: a clear description.
-3. SKILL_PATTERNS: a list of regex strings to trigger this skill.
-4. execute(target: str, extra: Dict[str, Any]) -> Dict[str, Any]:
-   - It should return a dict with {{"success": bool, "status": str, "message": str, "output": any}}.
-
-Return ONLY the raw Python code. No markdown formatting, no backticks, no preamble.
+FORGE_PROMPT_TEMPLATE = """Draft a Python skill module for human review.
+Requirements: {requirements}
+Define SKILL_NAME (lowercase snake_case), SKILL_DESCRIPTION, SKILL_PATTERNS,
+and execute(target, extra=None). Output only Python source.
+This candidate must not be installed or executed automatically.
 """
 
-def execute(target: str, extra: Dict[str, Any]) -> Dict[str, Any]:
-    """Fabricate a new skill based on the target requirements."""
-    if not ALLOW_CODE_EXECUTION:
+
+def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
+    if not ENABLE_SKILL_GENERATION:
         return {"success": False, "status": "disabled",
-                "message": "The Forge writes and registers new code; it is disabled for safety. "
-                           "Set JARVIS_ALLOW_CODE_EXECUTION=1 to enable it."}
-    requirements = target or extra.get("requirements", "unspecified requirements")
-    logger.info("[FORGE] Initiating fabrication for: %s", requirements)
-    
-    full_prompt = FORGE_PROMPT_TEMPLATE.format(requirements=requirements)
-    
+                "message": "Set JARVIS_ENABLE_SKILL_GENERATION=1 to opt into review-only skill proposals."}
+    requirements = target or (extra or {}).get("requirements", "unspecified requirements")
     try:
-        # 1. Generate the code
-        skill_code = query_ai(full_prompt, system_msg="You are an expert Python developer specialized in Jarvis-X skills.")
-        
-        # Clean up any accidental markdown backticks if AI ignored instructions
-        skill_code = re.sub(r"```python\n|```", "", skill_code).strip()
-
-        # 2. Extract skill name for filename
-        name_match = re.search(r'SKILL_NAME\s*=\s*["\']([^"\']+)["\']', skill_code)
-        if not name_match:
-            return {"success": False, "status": "error", "message": "Fabrication failed: AI did not provide a SKILL_NAME."}
-        
-        skill_filename = f"{name_match.group(1)}.py"
-        skills_dir = os.path.dirname(__file__)
-        file_path = os.path.join(skills_dir, skill_filename)
-
-        # 3. Write the file
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(skill_code)
-        
-        # 4. Re-discover skills
-        from skills import discover_skills
-        discover_skills()
-        
-        return {
-            "success": True, 
-            "status": "success", 
-            "message": f"Sir, I have successfully forged the '{skill_filename}' skill. Internal systems have been re-indexed to incorporate the new capability.",
-            "output": {"filename": skill_filename, "path": file_path}
-        }
-
-    except Exception as e:
-        logger.error("[FORGE] Fabrication failed: %s", e)
-        return {"success": False, "status": "error", "message": f"Sir, my fabrication cycle failed: {e}"}
+        raw = query_ai(
+            FORGE_PROMPT_TEMPLATE.format(requirements=requirements),
+            system_msg="Draft Python code for human review; return only a module.",
+        )
+        code = raw.strip()
+        if code.startswith("```python"):
+            code = code[len("```python"):]
+        if code.startswith("```"):
+            code = code[3:]
+        if code.endswith("```"):
+            code = code[:-3]
+        code = code.strip()
+        name = extract_skill_name(code)
+        if name is None:
+            return {"success": False, "status": "error", "message": "Generated candidate has no static SKILL_NAME."}
+        return stage_skill_candidate(code, name)
+    except Exception as exc:
+        logger.error("[FORGE] Skill proposal failed: %s", exc)
+        return {"success": False, "status": "error", "message": "Skill proposal generation failed; see logs."}
