@@ -334,7 +334,7 @@ class VoiceListener:
                 final_text = offline_text
                 
                 # Noise Gate: Only polish if we have some offline text or substantial audio
-                if is_online() and config.GROQ_API_KEY:
+                if config.ALLOW_CLOUD_STT and is_online() and config.GROQ_API_KEY:
                     # Skip polishing if Vosk heard nothing and we are just idling in ambient mode
                     if not offline_text and len(full_audio) < 32000: # Less than 1 second of audio
                          return
