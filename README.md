@@ -90,3 +90,17 @@ AI answers require a running Ollama instance with the `MODEL_NAME` model (defaul
 Background vision, proactive/autonomous monitoring, file organization, knowledge indexing, the sentinel, system monitoring, and MCP subprocesses are **disabled by default**. Enable individual `JARVIS_ENABLE_*` flags in `.env` when you want the respective behavior. The file organizer automatically moves newly created files on Desktop/Downloads. Vision can send screenshots to cloud providers; use it only with explicit intent.
 
 Use `python main.py --doctor` for a dependency and AI setup overview. Logs are in `assets/logs/jarvis.log`. Full microphone, speaker, graphical automation, and Windows integrations must be verified on a Windows PC.
+
+### Voice reliability and model setup
+
+The microphone callback now queues frames to a bounded worker; wake-word inference, Vosk and notifications run outside the real-time audio callback. Each TALK/wake event restarts the seven-second command window.
+
+The conversational `WAKE_WORD` and the separately configured OpenWakeWord `WAKE_MODEL_NAME` (default `hey jarvis`) are different settings. Jarvis **does not download wake models on startup**. Provision them once, after installing requirements:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import openwakeword; openwakeword.utils.download_models()"
+```
+
+Also install a Vosk English recognition model in the folder selected by `VOICE_MODEL_PATH` (default `voice/model`). Voice is unavailable until that Vosk model exists; the text UI can still be used. Run `python main.py --doctor` to inspect dependencies and configuration.
+
+CI includes a Windows Python 3.11 dependency installation and unit-test job. It does not validate microphone hardware, wake-word accuracy, speakers, or actual desktop automation; test those on the target Windows machine before a release.
