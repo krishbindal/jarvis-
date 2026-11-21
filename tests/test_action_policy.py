@@ -78,6 +78,21 @@ class PolicyUnitTests(unittest.TestCase):
         self.assertFalse(result["success"])
         execute.assert_not_called()
 
+    def test_direct_agent_keyboard_and_screen_bypass_is_denied(self):
+        from core.app import JarvisApp
+        with (
+            patch("core.app.agent_tools.type_text") as type_text,
+            patch("core.app.agent_tools.press_key") as press_key,
+            patch("core.app.agent_tools.read_screen") as screen,
+        ):
+            for tool in ("type_text", "press_key", "read_screen"):
+                with self.subTest(tool=tool):
+                    result = JarvisApp._execute_tool_step(object(), tool, "sensitive")
+                    self.assertEqual(result["status"], "approval_required")
+        type_text.assert_not_called()
+        press_key.assert_not_called()
+        screen.assert_not_called()
+
     def test_automation_click_denied_without_ui(self):
         from automation.executor import _execute_step
         from automation.plan import AutomationStep
