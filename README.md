@@ -118,3 +118,11 @@ Set `JARVIS_ENABLE_MCP_HUB=1` in your local `.env`, and review every enabled com
 **Dynamic Python execution is not a security sandbox.** `JARVIS_ALLOW_CODE_EXECUTION=0` is the default and should remain off unless you have reviewed and approved the code you will execute. Even when enabled, the separate temporary folder, `sys.executable -I`, and filtered environment do **not** restrict access to your files, network, or Windows permissions. Do not let an LLM autonomously execute untrusted code.
 
 The local n8n notification server remains disabled until `N8N_NOTIFY_TOKEN` is set. When enabled, it authenticates incoming requests, binds to loopback by default, limits payload size, and uses bounded socket reads. For future centralized action approvals and an emergency stop, see [issue #17](https://github.com/krishbindal/jarvis-/issues/17).
+
+### Separate privacy consent controls
+
+**Credentials alone do not authorize sharing personal data.** By default, Jarvis uses local Vosk for command recognition even if a Groq key is configured. Enable `JARVIS_ALLOW_CLOUD_STT=1` only to allow sending recorded microphone audio to Groq. Cloud screen analysis and screenshot uploads require `JARVIS_ALLOW_CLOUD_VISION=1`, including on-demand screen descriptions and element recognition. This includes images that may contain passwords, messages or private documents.
+
+Clipboard monitoring (`JARVIS_ENABLE_CLIPBOARD_MONITOR=1`) alone neither uploads nor persists clipboard contents. Those require separate `JARVIS_ALLOW_CLOUD_CLIPBOARD=1` and `JARVIS_REMEMBER_CLIPBOARD=1` settings, respectively. Autonomous local screen snapshots require `JARVIS_ALLOW_LOCAL_SCREEN_SNAPSHOTS=1`; screen files remain on the device until you delete them. Command-text logging defaults off (`JARVIS_LOG_COMMAND_TEXT=0`).
+
+**Limitations:** Other features can still explicitly send text to configured AI providers, and memory/history persist in local SQLite. These settings are controls for the specified automatic flows, not a full data-loss prevention system or a security boundary.
