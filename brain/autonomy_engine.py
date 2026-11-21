@@ -314,6 +314,10 @@ class AutonomyEngine:
 
     def _snapshot_worker(self) -> None:
         """Background worker: capture screen, summarize with vision, store in DB."""
+        from config import ALLOW_LOCAL_SCREEN_SNAPSHOTS
+        if not ALLOW_LOCAL_SCREEN_SNAPSHOTS:
+            return
+
         img_path = "assets/memory/photo_memory.png"
         try:
             import mss
