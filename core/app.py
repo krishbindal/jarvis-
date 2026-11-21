@@ -318,7 +318,10 @@ class JarvisApp:
 
             # -- [INPUT] --------------------------------------
             source = payload.get("source", "text")
-            logger.info("[INPUT] source=%s text='%s'", source, text)
+            if config.LOG_COMMAND_TEXT:
+                logger.info("[INPUT] source=%s text=%r", source, text)
+            else:
+                logger.info("[INPUT] source=%s chars=%d", source, len(text))
 
             # Signal overlay: thinking
             self._events.emit("overlay_state", {"state": "thinking", "text": text[:40]})
