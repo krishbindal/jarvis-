@@ -37,7 +37,8 @@ class GeneratedCodeExecutionTests(unittest.TestCase):
     def test_both_flags_required(self):
         import skills.system_agent as agent
         for allow_code, allow_model in ((False, False), (True, False), (False, True)):
-            with self.subTest(flags=(allow_code, allow_model)), (
+            with (
+                self.subTest(flags=(allow_code, allow_model)),
                 patch.object(agent, "ALLOW_CODE_EXECUTION", allow_code),
                 patch.object(agent, "ALLOW_MODEL_CODE_EXECUTION", allow_model),
                 patch.object(agent, "_generate_code") as generator,
