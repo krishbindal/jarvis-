@@ -486,9 +486,15 @@ def run_system_check(target: str = "") -> Dict:
     """Trigger the Sentinel Protocol (Master Diagnostic)."""
     try:
         # Run via the current interpreter as an argument list (no shell).
+        repo_root = Path(__file__).resolve().parents[1]
         res = subprocess.check_output(
-            [sys.executable, "jarvis_master_check.py"],
-            stderr=subprocess.STDOUT, text=True,
+            [sys.executable, "-m", "diagnostics.jarvis_master_check"],
+            cwd=str(repo_root),
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=45,
         )
         return {"success": True, "status": "success", "message": "Master Diagnostic complete.", "output": res}
     except Exception as exc:

@@ -79,7 +79,16 @@ def _chat_handler(target: str) -> Dict[str, Any]:
 def _system_check_handler(target: str) -> Dict[str, Any]:
     """Execute the Sentinel Protocol (Master Diagnostic)."""
     try:
-        res = subprocess.check_output([sys.executable, "jarvis_master_check.py"], stderr=subprocess.STDOUT, text=True)
+        repo_root = Path(__file__).resolve().parents[1]
+        res = subprocess.check_output(
+            [sys.executable, "-m", "diagnostics.jarvis_master_check"],
+            cwd=str(repo_root),
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=45,
+        )
         # Parse for the "STATUS" line to give a clean message
         status_line = [line for line in res.split('\n') if "STATUS:" in line]
         msg = status_line[0] if status_line else "Diagnostic completed."
@@ -232,18 +241,18 @@ def execute_action(
     """Execute a routed action with plugin system support and fallback logic."""
     extra = extra or {}
     
-    # -- Input Sanitization (Phase 32) ------------------------
-    # Some AI providers hallucinate argument names in the target string
-    if target:
-        # e.g. "name=chrome" -> "chrome", "app=spotify" -> "spotify"
-        if "=" in target and not target.startswith(("http", "www", "/")):
-            logger.warning(f"[EXEC] Sanitizing hallucinated target: {target}")
-            target = target.split("=")[-1].strip("'\" ")
-        
-        # Clean common punctuation injected by AI or STT
+    # Normalize only app names. Never rewrite Python, paths, URLs or messages:
+    # '=' and punctuation can be legitimate user input.
+    if action in ("open_app", "kill_process") and isinstance(target, str):
         target = target.strip(" .!,?")
+        for prefix in ("name=", "app="):
+            if target.lower().startswith(prefix):
+                target = target[len(prefix):].strip("'\\\" ")
+                break
 
-    logger.info(f"[EXEC] action={action} target='{target}'")
+    # Do not log complete Python scripts (they may contain credentials).
+    display_target = f"<{len(target)} chars of code>" if action == "execute_python" else str(target)[:160]
+    logger.info("[EXEC] action=%s target=%r", action, display_target)
 
     if action.startswith("mcp:"):
         hub = get_mcp_hub()
