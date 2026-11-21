@@ -138,6 +138,11 @@ class JarvisWindow(QMainWindow):
         input_row = QHBoxLayout()
         input_row.setSpacing(12)
         input_row.addWidget(self.command_input, stretch=1)
+        # Manual activation helps when wake-word model is unavailable.
+        talk = QPushButton("TALK")
+        talk.setToolTip("Listen for one command (requires a Vosk model)")
+        talk.clicked.connect(lambda: self._events.emit("jarvis_wake", {"source": "app_internal"}))
+        input_row.addWidget(talk)
         input_row.addWidget(execute)
 
         # Documentation / console
