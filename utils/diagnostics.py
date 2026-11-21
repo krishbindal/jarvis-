@@ -62,6 +62,15 @@ def run_diagnostics() -> bool:
     except (OSError, URLError, TimeoutError):
         print("OPTIONAL Ollama not running; start it if using a local model")
 
+    for label, enabled in (
+        ("Cloud STT audio upload", config.ALLOW_CLOUD_STT),
+        ("Cloud screen upload", config.ALLOW_CLOUD_VISION),
+        ("Cloud clipboard analysis", config.ALLOW_CLOUD_CLIPBOARD),
+        ("Clipboard persistence", config.REMEMBER_CLIPBOARD),
+        ("Local screen snapshots", config.ALLOW_LOCAL_SCREEN_SNAPSHOTS),
+    ):
+        print(f"{'ENABLED ' if enabled else 'DISABLED'} {label}")
+
     if os.name != "nt":
         print("NOTE     Jarvis desktop automation is Windows-oriented")
 
