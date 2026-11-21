@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 
 # How often to scan (seconds)
 DEFAULT_SCAN_INTERVAL = 60
-VISION_MODEL = "gemini-2.0-flash"
+from brain.provider_config import VISION_MODEL
 
 VISION_PROMPT = """You are observing a user's desktop screen. In 2-3 sentences, describe:
 1. What application is in the foreground (e.g., VS Code, Chrome, Slack, Terminal).
