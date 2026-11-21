@@ -766,6 +766,19 @@ class JarvisApp:
 
     def _execute_tool_step(self, tool: str, arg: str) -> dict:
         tool = tool or ""
+        # The agent loop uses direct automation functions. Enforce the same
+        # approval policy as plan execution before keyboard/click/screen access.
+        from core.action_policy import check_action
+        protected = {
+            "type_text": "automation:type",
+            "press_key": "automation:press_key",
+            "click": "automation:click",
+            "read_screen": "capture_screen",
+        }
+        if tool in protected:
+            denied = check_action(protected[tool], arg)
+            if denied is not None:
+                return denied
         if tool == "open_app":
             return agent_tools.open_app(arg)
         if tool == "type_text":
