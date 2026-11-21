@@ -118,12 +118,14 @@ class JarvisApp:
         self._autonomy = None
         self._web_server = JarvisWebServer(self._events)
 
-        # Phase 26: Start MCP Hub (Open Interpreter, Playwright, etc.)
-        try:
-            self._mcp_hub = get_mcp_hub()
-            threading.Thread(target=self._mcp_hub.start, name="mcp-hub", daemon=True).start()
-        except Exception as exc:
-            logger.error("Failed to start MCP Hub: %s", exc)
+        # MCP subprocesses are only started when explicitly enabled.
+        self._mcp_hub = None
+        if config.ENABLE_MCP_HUB:
+            try:
+                self._mcp_hub = get_mcp_hub()
+                threading.Thread(target=self._mcp_hub.start, name="mcp-hub", daemon=True).start()
+            except Exception as exc:
+                logger.error("Failed to start MCP Hub: %s", exc)
 
     # --─ Activation ------------------------------------------─
 
@@ -164,12 +166,9 @@ class JarvisApp:
             self._activation_event.wait()
             self._start_cinematic_sequence()
 
-            # Keep the main thread alive for background services
-            # This ensures that even if the UI closes or fails, the voice listener,
-            # proactive engine, and other background threads keep running.
-            logger.info("Application entering resident mode. Press Ctrl+C to stop.")
-            while self._running:
-                time.sleep(1)
+            # Exit when Qt exits; do not leave a headless background process behind.
+            logger.info("UI closed; stopping background services.")
+            self._running = False
 
         except KeyboardInterrupt:
             logger.info("Shutting down...")
@@ -188,14 +187,17 @@ class JarvisApp:
             pass
 
         # Phase 16: Start background vision provider
-        self._vision.start()
-        logger.info("[VISION] Background vision provider initiated.")
+        if config.ENABLE_BACKGROUND_VISION:
+            self._vision.start()
+            logger.info("[VISION] Background vision provider initiated.")
 
         # Phase 19: Start proactive intelligence loop
-        self._start_proactive_loop()
+        if config.ENABLE_PROACTIVE:
+            self._start_proactive_loop()
 
-        # Phase 30+: Start autonomy engine (background observer & scheduler)
-        self._start_autonomy_loop()
+        # Phase 30+: Habit observer and scheduler are opt-in.
+        if config.ENABLE_AUTONOMY:
+            self._start_autonomy_loop()
 
         # Phase 33: Start proactive web server for n8n
         self._web_server.start()
@@ -206,18 +208,19 @@ class JarvisApp:
         logger.info("[CLIPBOARD] Monitor started.")
 
         # Phase 28: Start Iron Man Monitor
-        if hasattr(self, '_sys_monitor'):
+        if config.ENABLE_SYSTEM_MONITOR and hasattr(self, '_sys_monitor'):
             self._sys_monitor.start()
 
         # Phase 23: Start File Sorcerer
-        self._sorcerer.start()
-        logger.info("[SORCERER] Autonomous filing started.")
+        if config.ENABLE_FILE_ORGANIZER:
+            self._sorcerer.start()
+            logger.info("[SORCERER] Autonomous filing started.")
 
-        # Phase 26: Start Knowledge Indexer
-        self._indexer.start()
+        if config.ENABLE_KNOWLEDGE_INDEXER:
+            self._indexer.start()
 
-        # Phase 26: Start Sentinel Fixer
-        self._sentinel.start()
+        if config.ENABLE_SENTINEL:
+            self._sentinel.start()
 
         # Phase 24: Habit prediction
         threading.Thread(target=self._predict_needs, daemon=True).start()
@@ -874,10 +877,9 @@ class JarvisApp:
         except Exception as exc:
             logger.error("Error stopping vision provider: %s", exc)
 
-        # Stop Iron Man System Monitor
+        # Stop system-monitor thread as part of normal shutdown.
         try:
-            # self._clap_detector.stop()  # Disabled to save CPU for Alexa-like responsiveness
-            pass
+            self._sys_monitor.stop()
         except Exception as exc:
             logger.error("Error stopping system monitor: %s", exc)
 
@@ -887,11 +889,12 @@ class JarvisApp:
         except Exception as exc:
             logger.error("Error stopping clipboard monitor: %s", exc)
 
-        # Stop wake word detector (Phase 20)
-        try:
-            self._wake_word.stop()
-        except Exception as exc:
-            logger.error("Error stopping wake word: %s", exc)
+        # The standalone detector is optional (voice listener normally handles it).
+        if self._wake_word is not None:
+            try:
+                self._wake_word.stop()
+            except Exception as exc:
+                logger.error("Error stopping wake word: %s", exc)
 
         try:
             self._clap_detector.stop()
@@ -900,16 +903,20 @@ class JarvisApp:
 
         # Stop MCP Hub
         try:
-            if hasattr(self, '_mcp_hub'):
+            if self._mcp_hub is not None:
                 self._mcp_hub.stop()
         except Exception as exc:
             logger.error("Error stopping MCP hub: %s", exc)
 
-        # Stop Sentinel Fixer
+        # Stop Sentinel Fixer and the local notification server.
         try:
             self._sentinel.stop()
         except Exception:
             pass
+        try:
+            self._web_server.stop()
+        except Exception as exc:
+            logger.error("Error stopping notification server: %s", exc)
 
         if hasattr(self, 'voice'):
             try:
