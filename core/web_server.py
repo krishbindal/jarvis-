@@ -40,14 +40,25 @@ class N8NNotificationHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             post_data = self.rfile.read(content_length)
-            payload = json.loads(post_data)
-            
-            # Expected payload: {"message": "Hello Sir", "type": "notification"}
+            try:
+                payload = json.loads(post_data)
+            except (ValueError, UnicodeDecodeError):
+                self.send_response(400)
+                self.end_headers()
+                return
+            if not isinstance(payload, dict):
+                self.send_response(400)
+                self.end_headers()
+                return
+
             message = payload.get("message", "")
-            msg_type = payload.get("type", "notification")
-            
+            if not isinstance(message, str) or len(message) > 2048:
+                self.send_response(400)
+                self.end_headers()
+                return
+
             if message:
-                logger.info("[WEB-SERVER] Received proactive notification: %s", message)
+                logger.info("[WEB-SERVER] Received authenticated notification (%d chars)", len(message))
                 # Global access to EventBus or passed in via server
                 self.server.event_bus.emit("proactive_warning", message)
                 
@@ -67,37 +78,54 @@ class N8NNotificationHandler(BaseHTTPRequestHandler):
         # Suppress standard logging to avoid cluttering the terminal
         return
 
+class _BoundedHTTPServer(HTTPServer):
+    """Apply a per-client read timeout, including to partial HTTP requests."""
+
+    def get_request(self):
+        request, address = super().get_request()
+        request.settimeout(5)
+        return request, address
+
+
 class JarvisWebServer:
     def __init__(self, event_bus: EventBus):
         self.event_bus = event_bus
         self.server: HTTPServer | None = None
         self.thread: threading.Thread | None = None
 
-    def start(self):
+    def start(self) -> bool:
         if not N8N_NOTIFY_TOKEN:
-            logger.warning(
-                "[WEB-SERVER] Disabled: set N8N_NOTIFY_TOKEN to enable the local "
-                "notification server (it is off by default to prevent unauthenticated access)."
+            logger.info("[WEB-SERVER] Disabled: configure N8N_NOTIFY_TOKEN to opt in.")
+            return False
+        if self.server is not None:
+            return True
+        try:
+            # Bind synchronously so shutdown cannot race an unstarted server.
+            server = _BoundedHTTPServer((N8N_NOTIFY_HOST, N8N_NOTIFY_PORT), N8NNotificationHandler)
+            server.event_bus = self.event_bus
+            server.auth_token = N8N_NOTIFY_TOKEN
+            self.server = server
+            self.thread = threading.Thread(
+                target=server.serve_forever, name="jarvis-web-server", daemon=True
             )
+            self.thread.start()
+            logger.info(
+                "[WEB-SERVER] Listening for n8n on %s:%d (token required)",
+                *server.server_address,
+            )
+            return True
+        except Exception as exc:
+            logger.error("[WEB-SERVER] Cannot start: %s", exc)
+            self.server = None
+            return False
+
+    def stop(self) -> None:
+        server = self.server
+        if server is None:
             return
-
-        def _run():
-            try:
-                self.server = HTTPServer((N8N_NOTIFY_HOST, N8N_NOTIFY_PORT), N8NNotificationHandler)
-                self.server.event_bus = self.event_bus
-                self.server.auth_token = N8N_NOTIFY_TOKEN
-                logger.info(
-                    "[WEB-SERVER] Listening for n8n notifications on %s:%d (token required)",
-                    N8N_NOTIFY_HOST, N8N_NOTIFY_PORT,
-                )
-                self.server.serve_forever()
-            except Exception as exc:
-                logger.error("[WEB-SERVER] Server failed: %s", exc)
-
-        self.thread = threading.Thread(target=_run, name="jarvis-web-server", daemon=True)
-        self.thread.start()
-
-    def stop(self):
-        if self.server:
-            self.server.shutdown()
-            self.server.server_close()
+        self.server = None
+        server.shutdown()
+        server.server_close()
+        if self.thread is not None and self.thread is not threading.current_thread():
+            self.thread.join(timeout=3)
+        self.thread = None

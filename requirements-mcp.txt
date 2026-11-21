@@ -1,0 +1,2 @@
+# Optional MCP v2 client dependency. Install only when enabling JARVIS_ENABLE_MCP_HUB.
+mcp>=2,<3

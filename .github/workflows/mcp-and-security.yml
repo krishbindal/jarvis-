@@ -1,0 +1,36 @@
+name: MCP v2 and Python execution security
+on:
+  push:
+  pull_request:
+jobs:
+  runner-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Test code execution and local web server
+        run: |
+          python -m unittest discover -s tests -p 'test_python_runner.py' -v
+          python -m unittest discover -s tests -p 'test_web_server.py' -v
+  mcp-integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-mcp.txt
+      - name: Install MCP SDK
+        run: python -m pip install -r requirements-mcp.txt
+      - name: Resolve dependency conflicts
+        run: python -m pip check
+      - name: Test real MCP stdio lifecycle
+        run: python -m unittest discover -s tests -p 'test_mcp_hub.py' -v
