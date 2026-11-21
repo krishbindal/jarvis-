@@ -92,7 +92,7 @@ class MCPHub:
             return bool(task.result(timeout=45))
         except (Exception, FutureTimeout):
             task.cancel()
-            logger.exception("[MCP] Hub initialization failed")
+            logger.error("[MCP] Hub initialization failed", exc_info=True)
             return False
 
     async def _init_servers(self) -> bool:
@@ -109,7 +109,7 @@ class MCPHub:
             try:
                 await self._connect_to_server(name, settings)
             except Exception:
-                logger.exception("[MCP] Failed connecting to server %s", name)
+                logger.error("[MCP] Failed connecting to server %s", name, exc_info=True)
         self._initialized = True
         logger.info("[MCP] Connected to %d server(s)", len(self._sessions))
         return bool(self._sessions)
@@ -184,7 +184,7 @@ class MCPHub:
             future.result(timeout=20)
         except Exception:
             future.cancel()
-            logger.exception("[MCP] Cleanup incomplete")
+            logger.error("[MCP] Cleanup incomplete", exc_info=True)
         finally:
             self._loop.call_soon_threadsafe(self._loop.stop)
             self._thread.join(timeout=5)
@@ -197,7 +197,7 @@ class MCPHub:
             try:
                 await client.__aexit__(None, None, None)
             except Exception:
-                logger.exception("[MCP] Failed closing client for server %s", name)
+                logger.error("[MCP] Failed closing client for server %s", name, exc_info=True)
         self._sessions.clear()
         self._tools.clear()
         self._initialized = False
