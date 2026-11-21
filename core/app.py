@@ -254,7 +254,7 @@ class JarvisApp:
             self._ui_app.exec()
             
         except Exception:
-            logger.exception("UI launch failed")
+            logger.error("UI launch failed", exc_info=True)
             raise
 
     def _predict_needs(self):
