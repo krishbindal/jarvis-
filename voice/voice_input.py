@@ -239,7 +239,7 @@ class VoiceListener:
             try:
                 self._process_audio(frame)
             except Exception:
-                logger.exception("[VOICE] Audio processing failed")
+                logger.error("[VOICE] Audio processing failed", exc_info=True)
             finally:
                 self._audio_queue.task_done()
 
