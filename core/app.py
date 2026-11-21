@@ -253,8 +253,9 @@ class JarvisApp:
             # This blocks until UI is closed
             self._ui_app.exec()
             
-        except Exception as exc:
-            logger.error("UI launch failed: %s", exc)
+        except Exception:
+            logger.exception("UI launch failed")
+            raise
 
     def _predict_needs(self):
         """Predict user needs on startup based on top habits (Phase 24)."""
