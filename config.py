@@ -71,3 +71,13 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# Background services are opt-in: vision/filing can access personal data.
+ENABLE_BACKGROUND_VISION = _env_flag("JARVIS_ENABLE_BACKGROUND_VISION", False)
+ENABLE_PROACTIVE = _env_flag("JARVIS_ENABLE_PROACTIVE", False)
+ENABLE_AUTONOMY = _env_flag("JARVIS_ENABLE_AUTONOMY", False)
+ENABLE_FILE_ORGANIZER = _env_flag("JARVIS_ENABLE_FILE_ORGANIZER", False)
+ENABLE_KNOWLEDGE_INDEXER = _env_flag("JARVIS_ENABLE_KNOWLEDGE_INDEXER", False)
+ENABLE_SENTINEL = _env_flag("JARVIS_ENABLE_SENTINEL", False)
+ENABLE_SYSTEM_MONITOR = _env_flag("JARVIS_ENABLE_SYSTEM_MONITOR", False)
+ENABLE_MCP_HUB = _env_flag("JARVIS_ENABLE_MCP_HUB", False)
