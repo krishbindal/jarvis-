@@ -104,17 +104,17 @@ class VoiceListener:
             
         try:
             # Find model folder
-            voice_dir = os.path.dirname(os.path.abspath(__file__))
-            model_path = os.path.join(voice_dir, "model")
-            
-            if not os.path.exists(model_path):
-                # Fallback to absolute search or relative to root
-                base_dir = os.path.dirname(voice_dir)
-                model_alt = os.path.join(base_dir, "vosk-model-small-en-us-0.15")
-                if os.path.exists(model_alt):
+            voice_dir = Path(__file__).resolve().parent
+            project_root = voice_dir.parent
+            model_path = Path(config.VOICE_MODEL_PATH).expanduser()
+            if not model_path.is_absolute():
+                model_path = project_root / model_path
+            if not model_path.is_dir():
+                model_alt = project_root / "vosk-model-small-en-us-0.15"
+                if model_alt.is_dir():
                     model_path = model_alt
                 else:
-                    logger.warning("[VOICE] Vosk model not found! Checked '%s' and '%s'", model_path, model_alt)
+                    logger.warning("[VOICE] Vosk model missing at '%s'. Text UI remains available.", model_path)
                     self.model = None
                     self.rec = None
                     return

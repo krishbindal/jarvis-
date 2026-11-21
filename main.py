@@ -1,63 +1,61 @@
-"""Entry point for JARVIS-X."""
-import sys
+"""Reliable command-line entry point for JARVIS-X."""
+from __future__ import annotations
+
+import argparse
 import socket
-import signal
-import time
-from core.app import JarvisApp
-from utils.startup import enable_autostart
-from utils.logger import get_logger
-from utils.events import EventBus
+import sys
 
-logger = get_logger(__name__)
 
-def signal_handler(sig, frame):
-    """Graceful shutdown protocol (Phase 30)."""
-    print("\n[SYSTEM] Shutdown initiated (Sentinel Protocol)...")
-    if "_bus" in globals() and _bus:
-        _bus.emit("system_shutdown")
-    
-    # Give threads a tiny window to cleanup
-    time.sleep(0.5)
-    
-    if "_lock_socket" in globals() and _lock_socket:
-        try:
-            _lock_socket.close()
-        except:
-            pass
-            
-    print("[SYSTEM] All systems offline. Goodbye, sir.")
-    sys.exit(0)
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="JARVIS-X desktop assistant")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--doctor", action="store_true", help="Check setup without starting the UI")
+    group.add_argument("--install-autostart", action="store_true", help="Opt in to Windows login startup")
+    group.add_argument("--remove-autostart", action="store_true", help="Remove the Windows login startup script")
+    parser.add_argument("--wait-for-clap", action="store_true", help="Wait for double clap instead of opening the UI")
+    return parser.parse_args(argv)
 
-# Register shutdown handler
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
 
-_bus = EventBus()
-_lock_socket = None
+def main(argv=None) -> int:
+    args = parse_args(argv)
 
-def main() -> None:
-    if "--doctor" in sys.argv:
+    # Keep diagnostics and autostart maintenance independent of GUI/audio imports.
+    if args.doctor:
         from utils.diagnostics import run_diagnostics
-        run_diagnostics()
-        sys.exit(0)
+        return 0 if run_diagnostics() else 1
 
-    global _lock_socket
-    
-    # Phase 26: Singleton Enforcement (prevent double instances)
+    if args.install_autostart or args.remove_autostart:
+        from utils.startup import enable_autostart, disable_autostart
+        success = enable_autostart() if args.install_autostart else disable_autostart()
+        print("Windows login startup updated." if success else "Unable to change startup settings; check the logs.")
+        return 0 if success else 1
+
     try:
-        _lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        _lock_socket.bind(("localhost", 9999))
-    except socket.error:
-        print("\n[CRITICAL] JARVIS-X is already running!")
-        print("Please check your Task Manager for any 'python.exe' or 'Jarvis' processes.")
-        sys.exit(1)
+        from core.app import JarvisApp
+    except (ImportError, OSError) as exc:
+        print(f"Cannot start Jarvis: {exc}", file=sys.stderr)
+        print("Install dependencies: python -m pip install -r requirements.txt", file=sys.stderr)
+        print("Then run: python main.py --doctor", file=sys.stderr)
+        return 1
 
-    # Ensure background start on future boots
-    enable_autostart()
-    
-    app = JarvisApp(auto_start=False)
-    app.run()
+    # Retain the lock for the lifetime of the process; never alter login startup implicitly.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as lock:
+        try:
+            lock.bind(("127.0.0.1", 9999))
+        except OSError as exc:
+            print("Jarvis is already running, or port 9999 is in use.", file=sys.stderr)
+            print(f"Details: {exc}", file=sys.stderr)
+            return 1
+        try:
+            app = JarvisApp(auto_start=not args.wait_for_clap)
+            app.run()
+            return 0
+        except KeyboardInterrupt:
+            return 0
+        except Exception as exc:
+            print(f"Jarvis failed: {exc}", file=sys.stderr)
+            return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

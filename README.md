@@ -67,3 +67,26 @@ Place your track at `assets/sounds/startup.mp3`. Playback is blocking to keep th
 - Clap detection uses an amplitude threshold; if your environment is noisy, tune `clap_threshold`, `max_gap_s`, and `cooldown_s` in `triggers/clap_detector.py`.
 - The detector now auto-calibrates ambient noise for the first two seconds, looks for two distinct peaks 0.5–1.0s apart, ignores continuous noise, and enforces a ~2.5s cooldown after a trigger.
 - Future phases will fill `brain/`, `executor/`, and `memory/` with AI, automation, and persistence modules.
+
+## Windows reliability quick start
+
+Use 64-bit Python 3.11. From the repository folder in PowerShell:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
+.\.venv\Scripts\python.exe main.py --doctor
+.\.venv\Scripts\python.exe main.py
+```
+
+Jarvis opens the desktop UI immediately so text commands work without a microphone. Run `python main.py --wait-for-clap` to wait for a double clap instead. Install a compatible English Vosk recognition model at `voice/model` (or set `VOICE_MODEL_PATH` in `.env`) for voice input. The **TALK** button offers manual voice activation when wake-word detection is unavailable. Some browser automation features additionally require `python -m playwright install chromium`.
+
+Jarvis will **not register Windows startup automatically**. To opt in: `python main.py --install-autostart`. To remove that entry: `python main.py --remove-autostart`.
+
+AI answers require a running Ollama instance with the `MODEL_NAME` model (default `llama3`), or an API key configured for a supported cloud provider. The UI and built-in commands can still be tested without those AI services.
+
+Background vision, proactive/autonomous monitoring, file organization, knowledge indexing, the sentinel, system monitoring, and MCP subprocesses are **disabled by default**. Enable individual `JARVIS_ENABLE_*` flags in `.env` when you want the respective behavior. The file organizer automatically moves newly created files on Desktop/Downloads. Vision can send screenshots to cloud providers; use it only with explicit intent.
+
+Use `python main.py --doctor` for a dependency and AI setup overview. Logs are in `assets/logs/jarvis.log`. Full microphone, speaker, graphical automation, and Windows integrations must be verified on a Windows PC.

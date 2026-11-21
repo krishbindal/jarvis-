@@ -20,3 +20,4 @@ openwakeword>=0.6
 playwright>=1.40
 duckduckgo-search>=5.0
 uiautomation>=2.0; platform_system == "Windows"
+watchdog>=4.0

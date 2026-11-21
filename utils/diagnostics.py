@@ -1,65 +1,69 @@
+"""Dependency-first health check that can run without the GUI or audio stack."""
+from __future__ import annotations
+
+import importlib.util
 import os
-import requests
-from config import GEMINI_API_KEY, GROQ_API_KEY, MODEL_NAME
-from utils.logger import get_logger
+from pathlib import Path
+from urllib.error import URLError
+from urllib.request import urlopen
 
-logger = get_logger(__name__)
+import config
 
-def run_diagnostics():
-    """Run a system health check (Sentinel Doctor)."""
-    print("\n--- [SENTINEL DOCTOR] ---")
-    print("Initiating System Diagnostics...\n")
-    
-    issues_found = 0
-    
-    # 1. API Keys
-    print("1. Checking External Credentials...")
-    if GROQ_API_KEY:
-        print("   [OK] Groq API Key found.")
-    else:
-        print("   [WARN] Groq API Key missing. Fast cloud responses disabled.")
-        issues_found += 1
-        
-    if GEMINI_API_KEY:
-        print("   [OK] Gemini API Key found.")
-    else:
-        print("   [WARN] Gemini API Key missing. Cloud fallback & Vision disabled.")
-        issues_found += 1
 
-    # 2. Local Ollama Health
-    print("\n2. Checking Local Inference Engine (Ollama)...")
+def _available(module: str) -> bool:
     try:
-        resp = requests.get("http://localhost:11434/api/tags", timeout=3)
-        if resp.status_code == 200:
-            models = [m['name'] for m in resp.json().get('models', [])]
-            if any(MODEL_NAME in m for m in models):
-                print(f"   [OK] Ollama is running and '{MODEL_NAME}' is available.")
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError, ModuleNotFoundError):
+        return False
+
+
+def run_diagnostics() -> bool:
+    """Print actionable checks and fail only for essential launch dependencies."""
+    print("\n=== JARVIS-X SETUP DOCTOR ===")
+    required = {
+        "PySide6": "PySide6", "sounddevice": "sounddevice", "numpy": "numpy",
+        "pygame": "pygame", "watchdog": "watchdog", "requests": "requests",
+        "groq": "groq", "google.genai": "google-genai", "psutil": "psutil",
+        "pyautogui": "pyautogui", "vosk": "vosk", "yt_dlp": "yt-dlp",
+    }
+    if os.name == "nt":
+        required.update({"win32gui": "pywin32", "win32process": "pywin32"})
+    failures = []
+    for module, package in required.items():
+        ok = _available(module)
+        print(f"{'OK     ' if ok else 'MISSING'} {module}")
+        if not ok:
+            failures.append(package)
+
+    if failures:
+        print("\nInstall missing dependencies using:")
+        print("  python -m pip install -r requirements.txt")
+        print("Missing packages: " + ", ".join(sorted(set(failures))))
+
+    model_path = Path(config.VOICE_MODEL_PATH).expanduser()
+    if not model_path.is_absolute():
+        model_path = Path(__file__).resolve().parent.parent / model_path
+    if model_path.is_dir():
+        print(f"OK      Vosk voice model: {model_path}")
+    else:
+        print(f"OPTIONAL Vosk model missing: {model_path} (text UI still works)")
+
+    if config.GROQ_API_KEY or config.GEMINI_API_KEY:
+        print("OK      Cloud AI credential configured")
+    else:
+        print("OPTIONAL No cloud AI keys; use local Ollama or set a key in .env")
+
+    try:
+        with urlopen("http://127.0.0.1:11434/api/tags", timeout=2) as response:
+            if response.status == 200:
+                print("OK      Ollama reachable")
             else:
-                print(f"   [WARN] Ollama is running but '{MODEL_NAME}' is missing.")
-                print(f"          Run: `ollama run {MODEL_NAME}` to pull it.")
-                issues_found += 1
-        else:
-            print("   [WARN] Ollama returned an unexpected status code.")
-            issues_found += 1
-    except Exception:
-        print("   [WARN] Ollama is not reachable on localhost:11434.")
-        print("          If you don't use local models, you can ignore this.")
-        issues_found += 1
-        
-    # 3. Audio & UI Basics
-    print("\n3. Verifying required dependencies...")
-    try:
-        import pygame
-        import mss
-        import cv2
-        print("   [OK] Critical UI and Media libraries present.")
-    except ImportError as e:
-        print(f"   [ERROR] Missing critical dependency: {e}")
-        issues_found += 1
-        
-    print("\n--- DIAGNOSTICS COMPLETE ---")
-    if issues_found == 0:
-        print("SYSTEM: ALL SYSTEMS NOMINAL. You are cleared for launch.")
-    else:
-        print(f"SYSTEM: {issues_found} potential issues detected.")
-        print("You may proceed, but some subsystem features may be disabled.")
+                print(f"OPTIONAL Ollama returned HTTP {response.status}")
+    except (OSError, URLError, TimeoutError):
+        print("OPTIONAL Ollama not running; start it if using a local model")
+
+    if os.name != "nt":
+        print("NOTE     Jarvis desktop automation is Windows-oriented")
+
+    print("\n" + ("READY: essential Python modules available" if not failures else "NOT READY: resolve missing modules"))
+    return not failures
