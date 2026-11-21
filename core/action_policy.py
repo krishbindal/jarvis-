@@ -64,6 +64,10 @@ class ActionApprovalManager:
     def request(self, action: str, target: Any = "") -> bool:
         if not needs_approval(action):
             return True
+        # Never block the Qt event loop waiting for a dialog on the same thread.
+        if threading.current_thread() is threading.main_thread():
+            logger.warning("[APPROVAL] Denied %s: action called on main thread", action)
+            return False
         with self._lock:
             if not self._ui_ready or self._bus is None:
                 logger.warning("[APPROVAL] Denied %s: no interactive UI", action)
