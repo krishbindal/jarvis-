@@ -69,6 +69,10 @@ def _env_flag(name: str, default: bool = False) -> bool:
 ALLOW_UNRESTRICTED_FS = _env_flag("JARVIS_ALLOW_UNRESTRICTED_FS", False)
 # When False, LLM-generated / dynamic code is NOT executed automatically.
 ALLOW_CODE_EXECUTION = _env_flag("JARVIS_ALLOW_CODE_EXECUTION", False)
+# Separately authorize execution of model-generated scripts (still not an OS sandbox).
+ALLOW_MODEL_CODE_EXECUTION = _env_flag("JARVIS_ALLOW_MODEL_CODE_EXECUTION", False)
+# Generate candidate skills only; candidates are never auto-imported or activated.
+ENABLE_SKILL_GENERATION = _env_flag("JARVIS_ENABLE_SKILL_GENERATION", False)
 # When False, clipboard contents are not sent to cloud LLMs.
 ENABLE_CLIPBOARD_MONITOR = _env_flag("JARVIS_ENABLE_CLIPBOARD_MONITOR", False)
 # When False, auto pip-install of missing modules is disabled.
