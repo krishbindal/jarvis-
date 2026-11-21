@@ -18,7 +18,7 @@ from typing import Optional
 from utils.logger import get_logger
 from utils.connectivity import is_online
 from brain.ai_engine import query_ai
-from config import ENABLE_CLIPBOARD_MONITOR
+from config import ENABLE_CLIPBOARD_MONITOR, ALLOW_CLOUD_CLIPBOARD, REMEMBER_CLIPBOARD
 
 logger = get_logger(__name__)
 
@@ -84,20 +84,22 @@ class ClipboardMonitor:
         content_stripped = content.strip()
         if not content_stripped or len(content_stripped) < 5:
             return
+        if not ALLOW_CLOUD_CLIPBOARD and not REMEMBER_CLIPBOARD:
+            return  # Monitoring alone grants neither cloud upload nor persistence.
 
         # 1. Immediate Notification (Existing)
-        if URL_PATTERN.match(content_stripped):
+        if ALLOW_CLOUD_CLIPBOARD and URL_PATTERN.match(content_stripped):
             self._events.emit("clipboard_url", {"url": content_stripped})
             threading.Thread(target=self._oracle_link, args=(content_stripped,), daemon=True).start()
-        elif any(indicator in content_stripped for indicator in CODE_INDICATORS):
+        elif ALLOW_CLOUD_CLIPBOARD and any(indicator in content_stripped for indicator in CODE_INDICATORS):
             self._events.emit("clipboard_code", {"code": content_stripped})
             threading.Thread(target=self._oracle_code, args=(content_stripped,), daemon=True).start()
-        elif len(content_stripped) > 300:
+        elif ALLOW_CLOUD_CLIPBOARD and len(content_stripped) > 300:
             self._events.emit("clipboard_text", {"text": content_stripped})
             threading.Thread(target=self._oracle_text, args=(content_stripped,), daemon=True).start()
             
         # Phase 22: Universal Memory Storage (Proactive)
-        if len(content_stripped) > 500:
+        if REMEMBER_CLIPBOARD and len(content_stripped) > 500:
              logger.info("[CLIPBOARD] Long content detected. Proactively saving to system memory.")
              from memory.memory_store import get_memory_store
              mem = get_memory_store()

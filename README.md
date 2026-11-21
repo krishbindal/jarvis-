@@ -1,6 +1,8 @@
-# JARVIS-X (Phase 1)
+# JARVIS-X — Windows desktop assistant
 
-Local, offline-first desktop assistant scaffolded for Windows using Python, PySide6, and Ollama (later phases). This repository currently delivers Phase 1: activation trigger, cinematic startup, and a styled UI shell.
+A Python 3.11 Windows desktop-assistant prototype combining PySide6 UI, offline Vosk speech recognition, optional cloud AI, local Ollama, desktop tools, persistent SQLite memory, and opt-in background services.
+
+**Status:** Automated tests cover selected components; this is not a certified production release. Full microphone, speaker, model, and Windows automation behavior still needs local hardware testing.
 
 ## Universal Desktop Automation
 - Natural-language → structured intent planner that emits `{goal, steps[]}` without hardcoded app/site flows.
@@ -27,38 +29,32 @@ Local, offline-first desktop assistant scaffolded for Windows using Python, PySi
 - `main.py` – entrypoint
 - `requirements.txt` – runtime dependencies
 
-## Dependencies
-Install with Python 3.10+:
+## Installation (Windows, Python 3.11 x64)
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-pip install -r requirements.txt
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
+.\.venv\Scripts\python.exe main.py --doctor
+.\.venv\Scripts\python.exe main.py
 ```
 
-Key packages: `PySide6`, `sounddevice`, `numpy`, `pygame`, `vosk` (offline ASR).
+The UI opens immediately. To wait for a double clap, use `python main.py --wait-for-clap`. For voice, provision an English Vosk model in `voice/model`; to enable OpenWakeWord, provision a supported wake model separately. `TALK` activates voice capture when Vosk is present. The startup MP3 is optional and not included in this repository.
 
-## Running
-Ensure a microphone is available, then:
+## AI configuration and privacy
 
-```bash
-python main.py
-```
+- Groq and Gemini require API keys configured locally in `.env`; Ollama needs a running local server and model.
+- Default Gemini model: `GEMINI_MODEL=gemini-3.5-flash`. The vision model defaults to the same ID; override with `JARVIS_VISION_MODEL`. Model availability and quotas depend on your account; verify using the official models API. No live cloud API test is performed by CI.
+- Background screenshots, clipboard monitoring, file sorting, autonomy, and MCP subprocesses are disabled by default. Opt in only when you understand the data accessed.
+- Cloud audio STT is off by default even if an API key exists; it requires JARVIS_ALLOW_CLOUD_STT=1. Vision and clipboard cloud sharing also require separate opt-ins.
+- Model-generated code execution is disabled unless **both** `JARVIS_ALLOW_CODE_EXECUTION=1` and `JARVIS_ALLOW_MODEL_CODE_EXECUTION=1`. This is NOT a security sandbox; generated scripts still have your OS user permissions.
+- Generated skill proposals are disabled by default (`JARVIS_ENABLE_SKILL_GENERATION=0`). If enabled, proposed Python is written only to `data/generated_skills_pending` for human review; it is never loaded automatically.
+- Per-action UI confirmations are implemented for identified high-impact paths; more comprehensive capability enforcement and a proven emergency stop across subprocesses remain tracked in issue #17. Do not give Jarvis administrator privileges.
 
-- Wait for a **double clap** to trigger startup.
-- The startup MP3 (`assets/sounds/startup.mp3`) plays with pygame, then the PySide6 HUD opens. If the file is missing, the app will continue without audio.
-- After wake, Jarvis briefly listens for a voice command using Vosk (offline). Place a model at `voice/model` (or set `VOICE_MODEL_PATH` in `config.py`). If nothing is captured, just type in the UI as before.
-- The UI now uses a dark Jarvis HUD with neon accents, a circular animation, command log panel, and status banner.
-- Commands typed into the UI emit `command_received` events; the core routes them and emits `command_result` back to the log.
+## What the automated tests actually check
 
-## Real-Time Experience
-- Immediate acknowledgements: Jarvis answers with a short verbal cue as soon as a command arrives (voice or text) and starts streaming a "thinking" narration token-by-token from your local Ollama model (fallback to Groq).
-- Speak -> Act -> Stream: Actions begin right away with mid-action voice lines (e.g., "Opening Chrome") and a continuous status feed to the overlay and console typewriter.
-- Interrupts: Say “stop” at any time to halt speech/streams via the event bus.
-- Cinematic console: System logs and streamed tokens render with a lightweight typewriter effect; the floating overlay mirrors command progress stages.
-- Context-aware agent loop: A shared session context (current app/url, last intent/action) feeds a planner that can continue follow-up commands on any app or site without hardcoded flows.
-
-If you want to bypass clap activation (e.g., during development), instantiate `JarvisApp(auto_start=True)` in `main.py`.
+GitHub Actions runs Python compilation, dependency installation, unit tests on Windows, and an optional MCP echo/subprocess integration test on Windows and Ubuntu. These tests do **not** validate a live microphone, speaker, actual AI API keys, real desktop interactions or performance on a specific laptop. Check the Actions page for the exact number of passing tests and skipped tests for your latest commit.
 
 ## Customizing the Startup Sound
 Place your track at `assets/sounds/startup.mp3`. Playback is blocking to keep the cinematic sequence intact.
@@ -118,3 +114,17 @@ Set `JARVIS_ENABLE_MCP_HUB=1` in your local `.env`, and review every enabled com
 **Dynamic Python execution is not a security sandbox.** `JARVIS_ALLOW_CODE_EXECUTION=0` is the default and should remain off unless you have reviewed and approved the code you will execute. Even when enabled, the separate temporary folder, `sys.executable -I`, and filtered environment do **not** restrict access to your files, network, or Windows permissions. Do not let an LLM autonomously execute untrusted code.
 
 The local n8n notification server remains disabled until `N8N_NOTIFY_TOKEN` is set. When enabled, it authenticates incoming requests, binds to loopback by default, limits payload size, and uses bounded socket reads. For future centralized action approvals and an emergency stop, see [issue #17](https://github.com/krishbindal/jarvis-/issues/17).
+
+### Per-action approvals (new in the action-policy branch)
+
+The desktop UI asks for explicit **Yes/No confirmation** before sensitive filesystem changes, dynamic skills, MCP calls, code execution, webhook delivery, screen capture, process/power commands, and automation click/type/download steps. Each approval is tied to a single pending action; an LLM cannot authorize itself by putting `"approved": true` in a command's extra fields.
+
+If the Qt UI is absent or closes, actions needing approval are **denied** rather than executed. The Stop command also cancels outstanding approval requests. No approval is retained between actions. This is an application-level confirmation layer, **not** a security sandbox or a guarantee that every possible side effect is covered. Hardware and interactive confirmation behavior must be verified on Windows before relying on it.
+
+### Separate privacy consent controls
+
+**Credentials alone do not authorize sharing personal data.** By default, Jarvis uses local Vosk for command recognition even if a Groq key is configured. Enable `JARVIS_ALLOW_CLOUD_STT=1` only to allow sending recorded microphone audio to Groq. Cloud screen analysis and screenshot uploads require `JARVIS_ALLOW_CLOUD_VISION=1`, including on-demand screen descriptions and element recognition. This includes images that may contain passwords, messages or private documents.
+
+Clipboard monitoring (`JARVIS_ENABLE_CLIPBOARD_MONITOR=1`) alone neither uploads nor persists clipboard contents. Those require separate `JARVIS_ALLOW_CLOUD_CLIPBOARD=1` and `JARVIS_REMEMBER_CLIPBOARD=1` settings, respectively. Autonomous local screen snapshots require `JARVIS_ALLOW_LOCAL_SCREEN_SNAPSHOTS=1`; screen files remain on the device until you delete them. Command-text logging defaults off (`JARVIS_LOG_COMMAND_TEXT=0`).
+
+**Limitations:** Other features can still explicitly send text to configured AI providers, and memory/history persist in local SQLite. These settings are controls for the specified automatic flows, not a full data-loss prevention system or a security boundary.

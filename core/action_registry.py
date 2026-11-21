@@ -21,6 +21,7 @@ from skills import execute_skill
 from executor.system_executor import _native_open
 
 from core.mcp_hub import get_mcp_hub
+from core.action_policy import check_action
 
 from executor.conversion_executor import convert_to_mp3, convert_to_pdf
 from executor.download_executor import download_file, download_video
@@ -253,6 +254,13 @@ def execute_action(
     # Do not log complete Python scripts (they may contain credentials).
     display_target = f"<{len(target)} chars of code>" if action == "execute_python" else str(target)[:160]
     logger.info("[EXEC] action=%s target=%r", action, display_target)
+
+    # Approval is controlled by the local Qt dialog, never by model-provided extra.
+    # Skill dispatch asks for approval inside execute_skill to avoid double prompts.
+    if not action.startswith("skill:"):
+        denied = check_action(action, target)
+        if denied is not None:
+            return denied
 
     if action.startswith("mcp:"):
         hub = get_mcp_hub()

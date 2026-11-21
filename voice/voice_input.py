@@ -334,14 +334,14 @@ class VoiceListener:
                 final_text = offline_text
                 
                 # Noise Gate: Only polish if we have some offline text or substantial audio
-                if is_online() and config.GROQ_API_KEY:
+                if config.ALLOW_CLOUD_STT and is_online() and config.GROQ_API_KEY:
                     # Skip polishing if Vosk heard nothing and we are just idling in ambient mode
                     if not offline_text and len(full_audio) < 32000: # Less than 1 second of audio
                          return
 
                     online_text = self._transcribe_online(full_audio)
                     if online_text and len(online_text.strip()) > 2:
-                        logger.info(f"[VOICE] Groq polished: '{online_text}' (Vosk said: '{offline_text}')")
+                        logger.info("[VOICE] Cloud STT completed (%d chars)", len(online_text))
                         final_text = online_text
                 
                 if self._event_bus:
@@ -356,7 +356,7 @@ class VoiceListener:
                         return
                     # Broad criteria to avoid noise triggering commands
                     if any(word in final_text.lower() for word in COMMAND_KEYWORDS) or len(final_text.split()) > 2:
-                        logger.info("✅ Voice Command: %s", final_text)
+                        logger.info("[VOICE] Command recognized (%d chars)", len(final_text))
                         self._event_bus.emit(
                             "command_received",
                             {"text": final_text, "source": "voice"}

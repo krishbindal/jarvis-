@@ -30,6 +30,7 @@ class AutomationPlannerTests(TestCase):
 
 
 class AutomationExecutorTests(TestCase):
+    @patch("automation.executor.check_action", return_value=None)
     @patch("automation.executor._scroll", return_value={"success": True, "status": "success", "message": "Scrolled"})
     @patch("automation.executor.download_file", return_value={"success": True, "status": "success", "message": "downloaded"})
     @patch("automation.executor.execute_action", return_value={"success": True, "status": "success", "message": "opened", "resolved_target": "https://example.com"})

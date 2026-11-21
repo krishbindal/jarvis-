@@ -4,13 +4,12 @@ Skill: Generates and executes Python code dynamically to fulfill system intents.
 Handles: "convert", "download", "extract", "run", "do almost anything"
 """
 
-import os
-import subprocess
-import tempfile
 from typing import Any, Dict
 
 from utils.logger import get_logger
-from config import GROQ_API_KEY, GEMINI_API_KEY, ALLOW_CODE_EXECUTION
+from config import GROQ_API_KEY, GEMINI_API_KEY, ALLOW_CODE_EXECUTION, ALLOW_MODEL_CODE_EXECUTION
+from brain.provider_config import GEMINI_MODEL
+from executor.python_runner import run_python_code
 
 logger = get_logger(__name__)
 
@@ -32,7 +31,7 @@ SYSTEM_PROMPT = """You are an elite Python expert acting as the operating system
 You will receive an intent. You MUST output ONLY valid python code to accomplish the intent.
 Do not use markdown blocks like ```python. Just output raw python code. DO NOT ADD COMMENTARY.
 Use the standard library where possible (e.g. urllib, os, shutil, subprocess, pathlib).
-If you need external libraries (like Pillow, yt-dlp, requests), you can try to install them via `subprocess.call(['pip', 'install', '--quiet', '...'])` at the very top of your script.
+Do not install packages, modify permissions, contact third-party servers, or execute shell commands without a separate explicit user request.
 Your code will be executed on a Windows 11 machine. Ensure paths are joined properly (raw strings for windows paths).
 Always print the outcome or final file paths to stdout so the user knows what happened.
 """
@@ -72,7 +71,7 @@ def _generate_code(intent: str) -> str:
             from google import genai
             client = genai.Client(api_key=GEMINI_API_KEY)
             response = client.models.generate_content(
-                model='gemini-2.0-flash',
+                model=GEMINI_MODEL,
                 contents=f"{SYSTEM_PROMPT}\n\nUser intent: {intent}"
             )
             return _clean_markdown(response.text)
@@ -83,54 +82,30 @@ def _generate_code(intent: str) -> str:
 
 
 def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
-    """Dynamically generate and execute a script to fulfill the intent."""
-    logger.info(f"[SYSTEM_AGENT] Goal: {target}")
-    if not ALLOW_CODE_EXECUTION:
-        logger.warning("[SYSTEM_AGENT] Blocked: code execution disabled.")
-        return {"success": False, "status": "disabled", "message": _CODE_EXEC_DISABLED_MSG}
+    """Execute model-generated code only when both explicit opt-ins are enabled.
+
+    This is not a security sandbox. Review generated code and run Jarvis with
+    ordinary user permissions, never elevated permissions.
+    """
+    if not ALLOW_CODE_EXECUTION or not ALLOW_MODEL_CODE_EXECUTION:
+        return {
+            "success": False,
+            "status": "disabled",
+            "message": (
+                "Generated scripts require both JARVIS_ALLOW_CODE_EXECUTION=1 and "
+                "JARVIS_ALLOW_MODEL_CODE_EXECUTION=1. Model code runs with your "
+                "normal filesystem/network permissions; manually review it first."
+            ),
+        }
     try:
-        # Generate the Python script
         code = _generate_code(target)
-        logger.debug(f"[SYSTEM_AGENT] Generated Code:\n{code}")
-        
-        # Write to a temporary file
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
-            f.write(code)
-            tmp_path = f.name
-            
-        logger.info(f"[SYSTEM_AGENT] Executing dynamic script...")
-        
-        # Execute the script
-        result = subprocess.run(["python", tmp_path], capture_output=True, text=True, timeout=120)
-        
-        # Cleanup
-        try:
-            os.remove(tmp_path)
-        except Exception:
-            pass
-            
-        if result.returncode == 0:
-            msg = result.stdout.strip() if result.stdout else "Operation completed successfully."
-            logger.info(f"[SYSTEM_AGENT] Success: {msg[:100]}")
-            return {
-                "success": True,
-                "status": "success",
-                "message": msg[:200],  # Give Jarvis a short response to say
-                "output": msg
-            }
-        else:
-            err = result.stderr.strip()
-            logger.error(f"[SYSTEM_AGENT] Script Error:\n{err}")
-            return {
-                "success": False,
-                "status": "error",
-                "message": f"I hit an error: {err[:150]}"
-            }
-            
-    except Exception as e:
-        logger.error(f"[SYSTEM_AGENT] Failed: {e}")
+        # Reuse one bounded, secret-filtering subprocess runner rather than
+        # launching an unrestricted inherited-environment 'python' executable.
+        return run_python_code(code)
+    except Exception as exc:
+        logger.error("[SYSTEM_AGENT] Failed: %s", exc)
         return {
             "success": False,
             "status": "error",
-            "message": f"System Agent error: {str(e)[:150]}"
+            "message": "System Agent failed; check the local logs.",
         }

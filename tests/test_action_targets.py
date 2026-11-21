@@ -11,7 +11,10 @@ class ActionTargetTests(unittest.TestCase):
     def test_python_code_with_assignments_is_not_rewritten(self):
         source = "secret = 'contains=a=b'\nprint(secret)"
         seen = []
-        with patch.dict(action_registry.ACTION_REGISTRY, {"execute_python": lambda code: seen.append(code) or {"success": True}}):
+        with (
+            patch.dict(action_registry.ACTION_REGISTRY, {"execute_python": lambda code: seen.append(code) or {"success": True}}),
+            patch.object(action_registry, "check_action", return_value=None),
+        ):
             result = action_registry.execute_action("execute_python", source)
         self.assertTrue(result["success"])
         self.assertEqual(seen, [source])

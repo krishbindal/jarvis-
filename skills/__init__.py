@@ -95,6 +95,13 @@ def execute_skill(skill_name: str, target: str, extra: Optional[Dict] = None) ->
     if not skill:
         return {"success": False, "status": "error", "message": f"Skill not found: {skill_name}"}
 
+    # Every dynamic skill is a potentially consequential plugin. Require a
+    # one-time user confirmation; model-provided extras cannot grant approval.
+    from core.action_policy import check_action
+    denied = check_action(f"skill:{skill_name}", target)
+    if denied is not None:
+        return denied
+
     try:
         return skill["execute"](target, extra or {})
     except Exception as e:

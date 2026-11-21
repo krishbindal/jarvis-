@@ -71,6 +71,9 @@ class JarvisApp:
         self._ui_overlay = None
         self._activation_event = threading.Event()
         self._events = EventBus()
+        from core.action_policy import get_action_approvals
+        get_action_approvals().configure(self._events)
+        self._events.subscribe("interrupt_autonomy", lambda *_: get_action_approvals().cancel_all())
         self._events.subscribe("jarvis_wake", self._handle_activation)
         self._events.subscribe("command_received", self._handle_command)
         self._events.subscribe("proactive_warning", lambda msg: speak(msg))
@@ -318,7 +321,10 @@ class JarvisApp:
 
             # -- [INPUT] --------------------------------------
             source = payload.get("source", "text")
-            logger.info("[INPUT] source=%s text='%s'", source, text)
+            if config.LOG_COMMAND_TEXT:
+                logger.info("[INPUT] source=%s text=%r", source, text)
+            else:
+                logger.info("[INPUT] source=%s chars=%d", source, len(text))
 
             # Signal overlay: thinking
             self._events.emit("overlay_state", {"state": "thinking", "text": text[:40]})
@@ -763,6 +769,19 @@ class JarvisApp:
 
     def _execute_tool_step(self, tool: str, arg: str) -> dict:
         tool = tool or ""
+        # The agent loop uses direct automation functions. Enforce the same
+        # approval policy as plan execution before keyboard/click/screen access.
+        from core.action_policy import check_action
+        protected = {
+            "type_text": "automation:type",
+            "press_key": "automation:press_key",
+            "click": "automation:click",
+            "read_screen": "capture_screen",
+        }
+        if tool in protected:
+            denied = check_action(protected[tool], arg)
+            if denied is not None:
+                return denied
         if tool == "open_app":
             return agent_tools.open_app(arg)
         if tool == "type_text":
@@ -840,6 +859,8 @@ class JarvisApp:
     # --─ Shutdown --------------------------------------------
 
     def _shutdown(self) -> None:
+        from core.action_policy import get_action_approvals
+        get_action_approvals().set_ui_ready(False)
         self._running = False
         # Stop File Sorcerer (Phase 23)
         try:

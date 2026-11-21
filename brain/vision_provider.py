@@ -19,14 +19,14 @@ from google import genai
 
 from PIL import Image
 
-from config import GEMINI_API_KEY
+from config import GEMINI_API_KEY, ALLOW_CLOUD_VISION
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 # How often to scan (seconds)
 DEFAULT_SCAN_INTERVAL = 60
-VISION_MODEL = "gemini-2.0-flash"
+from brain.provider_config import VISION_MODEL
 
 VISION_PROMPT = """You are observing a user's desktop screen. In 2-3 sentences, describe:
 1. What application is in the foreground (e.g., VS Code, Chrome, Slack, Terminal).
@@ -63,6 +63,9 @@ class VisionProvider:
 
     def start(self) -> None:
         """Start the background vision loop."""
+        if not ALLOW_CLOUD_VISION:
+            logger.info("[VISION] Cloud screenshot upload disabled until JARVIS_ALLOW_CLOUD_VISION=1.")
+            return
         if not GEMINI_API_KEY:
             logger.warning("[VISION] No GEMINI_API_KEY set — Vision provider disabled.")
             return
@@ -115,6 +118,9 @@ class VisionProvider:
 
     def _capture_and_analyze(self) -> str:
         """Take a screenshot and send it to Gemini Flash for analysis."""
+        if not ALLOW_CLOUD_VISION:
+            return "Cloud screen analysis disabled by privacy settings."
+
         try:
             import mss
 
@@ -172,6 +178,9 @@ class VisionProvider:
         Use Vision to find the (x, y) coordinates of a UI element.
         Returns scaled (x, y) for the current screen resolution.
         """
+        if not ALLOW_CLOUD_VISION:
+            return None
+
         try:
             import mss
             with mss.mss() as sct:
