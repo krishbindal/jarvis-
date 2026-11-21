@@ -14,6 +14,21 @@ _NAME = re.compile(r"[a-z][a-z0-9_]{1,48}\Z")
 DEFAULT_STAGING_DIR = Path(__file__).resolve().parents[1] / "data" / "generated_skills_pending"
 
 
+def extract_skill_name(code: str) -> str | None:
+    """Read a literal declared skill name without evaluating untrusted Python."""
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, TypeError, ValueError):
+        return None
+    names = [
+        node.value.value for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "SKILL_NAME" for target in node.targets)
+        and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+    ]
+    return names[0] if len(names) == 1 else None
+
+
 def stage_skill_candidate(code: str, proposed_name: str, output_dir: Path | None = None) -> Dict[str, Any]:
     """Validate syntax/name and write a candidate, never importing it."""
     if not isinstance(code, str) or not code.strip() or len(code) > 20_000:
@@ -27,13 +42,7 @@ def stage_skill_candidate(code: str, proposed_name: str, output_dir: Path | None
     except SyntaxError as exc:
         return {"success": False, "status": "error", "message": f"Candidate has invalid Python syntax (line {exc.lineno})."}
 
-    declared_names = [
-        node.value.value for node in parsed.body
-        if isinstance(node, ast.Assign)
-        and any(isinstance(target, ast.Name) and target.id == "SKILL_NAME" for target in node.targets)
-        and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
-    ]
-    if declared_names != [proposed_name]:
+    if extract_skill_name(code) != proposed_name:
         return {"success": False, "status": "error", "message": "Declared SKILL_NAME must match the proposed safe filename."}
 
     folder = Path(output_dir) if output_dir is not None else DEFAULT_STAGING_DIR
