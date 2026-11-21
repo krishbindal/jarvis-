@@ -80,8 +80,8 @@ def main() -> int:
                 overlay.deleteLater()
             if window is not None:
                 window._typing_timer.stop()
-                window._timer.stop()
-                window._stats_timer.stop()
+                window.hud._timer.stop()
+                window.hud._stats_timer.stop()
                 window.close()
                 window.deleteLater()
             with bus._lock:
