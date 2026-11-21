@@ -73,6 +73,12 @@ ALLOW_CODE_EXECUTION = _env_flag("JARVIS_ALLOW_CODE_EXECUTION", False)
 ENABLE_CLIPBOARD_MONITOR = _env_flag("JARVIS_ENABLE_CLIPBOARD_MONITOR", False)
 # When False, auto pip-install of missing modules is disabled.
 ALLOW_AUTO_PIP = _env_flag("JARVIS_ALLOW_AUTO_PIP", False)
+# Separate, explicit data-sharing permissions; API credentials alone never grant consent.
+ALLOW_CLOUD_STT = _env_flag("JARVIS_ALLOW_CLOUD_STT", False)
+ALLOW_CLOUD_VISION = _env_flag("JARVIS_ALLOW_CLOUD_VISION", False)
+ALLOW_CLOUD_CLIPBOARD = _env_flag("JARVIS_ALLOW_CLOUD_CLIPBOARD", False)
+REMEMBER_CLIPBOARD = _env_flag("JARVIS_REMEMBER_CLIPBOARD", False)
+ALLOW_LOCAL_SCREEN_SNAPSHOTS = _env_flag("JARVIS_ALLOW_LOCAL_SCREEN_SNAPSHOTS", False)
 
 # Downloads
 DOWNLOAD_DIR = os.getenv("JARVIS_DOWNLOAD_DIR", os.path.expanduser("~/Downloads"))
