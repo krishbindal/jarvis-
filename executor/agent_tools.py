@@ -93,63 +93,9 @@ def scroll(amount: int | str = -800) -> Dict[str, Any]:
 # ── Python Code Interpreter (Phase 35) ───────────────────────
 
 def execute_python(code: str) -> Dict[str, Any]:
-    """Execute Python code in a sandboxed subprocess and return stdout/stderr."""
-    import tempfile
-    import subprocess
-    import os
-    from config import ALLOW_CODE_EXECUTION
-
-    if not ALLOW_CODE_EXECUTION:
-        return {
-            "success": False,
-            "status": "disabled",
-            "message": "Python code execution is disabled for safety. "
-                       "Set JARVIS_ALLOW_CODE_EXECUTION=1 to enable it.",
-        }
-
-    workspace = os.path.join(tempfile.gettempdir(), "jarvis_sandbox")
-    os.makedirs(workspace, exist_ok=True)
-    script_path = os.path.join(workspace, "_jarvis_exec.py")
-
-    try:
-        with open(script_path, "w", encoding="utf-8") as f:
-            f.write(code)
-
-        result = subprocess.run(
-            ["python", script_path],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=workspace,
-            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
-        )
-
-        stdout = result.stdout.strip()
-        stderr = result.stderr.strip()
-
-        if result.returncode == 0:
-            return {
-                "success": True,
-                "status": "success",
-                "message": f"Code executed successfully.",
-                "output": stdout or "(no output)",
-            }
-        else:
-            return {
-                "success": False,
-                "status": "error",
-                "message": f"Script exited with code {result.returncode}",
-                "output": stderr or stdout or "(no output)",
-            }
-    except subprocess.TimeoutExpired:
-        return {"success": False, "status": "error", "message": "Script timed out after 30 seconds."}
-    except Exception as exc:
-        return {"success": False, "status": "error", "message": str(exc)}
-    finally:
-        try:
-            os.remove(script_path)
-        except Exception:
-            pass
+    """Execute opted-in Python with a filtered environment; NOT a sandbox."""
+    from executor.python_runner import run_python_code
+    return run_python_code(code)
 
 
 # ── Semantic UI Automation (Phase 35) ─────────────────────────
