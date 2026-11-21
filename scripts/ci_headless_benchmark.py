@@ -34,6 +34,7 @@ def main() -> int:
 
     qt_start = time.perf_counter()
     app = QApplication.instance() or QApplication([])
+    app.setQuitOnLastWindowClosed(False)
     bus = EventBus()
     window = None
     overlay = None
@@ -67,11 +68,17 @@ def main() -> int:
         print(json.dumps(result, indent=2))
         return 0
     finally:
+        # Emit an explicit cleanup trace so a native Qt process exit is
+        # distinguishable from a successful benchmark with teardown errors.
+        print("[CI-QT] cleanup: started", file=sys.stderr, flush=True)
         if overlay is not None:
             overlay.close()
+            print("[CI-QT] cleanup: overlay closed", file=sys.stderr, flush=True)
         if window is not None:
             window.close()
+            print("[CI-QT] cleanup: main closed", file=sys.stderr, flush=True)
         app.quit()
+        print("[CI-QT] cleanup: done", file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":
