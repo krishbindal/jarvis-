@@ -118,3 +118,9 @@ Set `JARVIS_ENABLE_MCP_HUB=1` in your local `.env`, and review every enabled com
 **Dynamic Python execution is not a security sandbox.** `JARVIS_ALLOW_CODE_EXECUTION=0` is the default and should remain off unless you have reviewed and approved the code you will execute. Even when enabled, the separate temporary folder, `sys.executable -I`, and filtered environment do **not** restrict access to your files, network, or Windows permissions. Do not let an LLM autonomously execute untrusted code.
 
 The local n8n notification server remains disabled until `N8N_NOTIFY_TOKEN` is set. When enabled, it authenticates incoming requests, binds to loopback by default, limits payload size, and uses bounded socket reads. For future centralized action approvals and an emergency stop, see [issue #17](https://github.com/krishbindal/jarvis-/issues/17).
+
+### Per-action approvals (new in the action-policy branch)
+
+The desktop UI asks for explicit **Yes/No confirmation** before sensitive filesystem changes, dynamic skills, MCP calls, code execution, webhook delivery, screen capture, process/power commands, and automation click/type/download steps. Each approval is tied to a single pending action; an LLM cannot authorize itself by putting `"approved": true` in a command's extra fields.
+
+If the Qt UI is absent or closes, actions needing approval are **denied** rather than executed. The Stop command also cancels outstanding approval requests. No approval is retained between actions. This is an application-level confirmation layer, **not** a security sandbox or a guarantee that every possible side effect is covered. Hardware and interactive confirmation behavior must be verified on Windows before relying on it.
