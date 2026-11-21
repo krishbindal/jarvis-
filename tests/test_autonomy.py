@@ -4,7 +4,7 @@ import os
 # Add parent path to import correctly
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.event_bus import EventBus
+from utils.events import EventBus
 from brain.proactive_engine import get_proactive_engine
 import time
 
