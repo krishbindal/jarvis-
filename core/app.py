@@ -199,13 +199,9 @@ class JarvisApp:
         if config.ENABLE_AUTONOMY:
             self._start_autonomy_loop()
 
-        # Phase 33: Start proactive web server for n8n
+        # Each service reports its own actual startup result; no false "listening" logs.
         self._web_server.start()
-        logger.info("[WEB-SERVER] Proactive n8n hub listening.")
-
-        # Phase 22: Start clipboard monitor
         self._clipboard.start()
-        logger.info("[CLIPBOARD] Monitor started.")
 
         # Phase 28: Start Iron Man Monitor
         if config.ENABLE_SYSTEM_MONITOR and hasattr(self, '_sys_monitor'):

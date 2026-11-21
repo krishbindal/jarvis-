@@ -1,19 +1,21 @@
+"""Optional MCP v2 stdio integration with explicit subprocess lifecycle."""
+from __future__ import annotations
+
 import asyncio
+from concurrent.futures import TimeoutError as FutureTimeout
 import json
-import logging
+import os
 import threading
-from typing import Dict, List, Any, Optional
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 try:
-    from mcp import ClientSession, StdioServerParameters
-    from mcp.client.stdio import stdio_client
+    from mcp import Client, StdioServerParameters
     _MCP_AVAILABLE = True
     _MCP_ERROR = None
 except Exception as exc:  # noqa: BLE001
-    ClientSession = None
+    Client = None
     StdioServerParameters = None
-    stdio_client = None
     _MCP_AVAILABLE = False
     _MCP_ERROR = exc
 
@@ -21,19 +23,31 @@ from utils.logger import get_logger
 
 logger = get_logger("jarvis.mcp")
 
+# Opt-in subprocess integrations should not inherit AI or email secrets by default.
+_INHERITED_MCP_ENV = (
+    "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC",
+    "TEMP", "TMP", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+)
+
+
+def _server_environment(configured: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    environment = {name: os.environ[name] for name in _INHERITED_MCP_ENV if name in os.environ}
+    if configured:
+        environment.update({str(name): str(value) for name, value in configured.items()})
+    return environment
+
 
 class NoopMCPHub:
-    """Fallback hub when MCP dependencies are missing."""
+    """Harmless fallback when the optional MCP SDK is not installed."""
 
-    def __init__(self, reason: Exception | None = None):
-        self._tools: Dict[str, Any] = {}
+    def __init__(self, reason: Optional[Exception] = None):
         self._reason = reason
 
-    def start(self):
-        logger.warning("[MCP] MCP dependencies unavailable: %s", self._reason)
+    def start(self) -> bool:
+        logger.warning("[MCP] Optional SDK unavailable: %s", self._reason)
         return False
 
-    def stop(self):
+    def stop(self) -> bool:
         return True
 
     def get_available_tools(self) -> Dict[str, Any]:
@@ -42,142 +56,158 @@ class NoopMCPHub:
     def call_tool(self, tool_id: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         return {"success": False, "error": f"MCP unavailable: {self._reason}"}
 
+
 class MCPHub:
-    """
-    Central manager for Model Context Protocol (MCP) servers.
-    Bridges external specialized tools into JARVIS's command system.
-    """
+    """Run v2 MCP clients on a dedicated asyncio loop, closing every client on stop."""
+
     def __init__(self, config_path: str = "config/mcp_servers.json"):
         self.config_path = config_path
         self._servers: Dict[str, Dict[str, Any]] = {}
-        self._sessions: Dict[str, ClientSession] = {}
+        self._sessions: Dict[str, Any] = {}
+        self._tools: Dict[str, Dict[str, Any]] = {}
         self._loop = asyncio.new_event_loop()
-        self._thread = threading.Thread(target=self._run_event_loop, daemon=True)
-        self._tools = {}
+        self._thread = threading.Thread(
+            target=self._run_event_loop, name="jarvis-mcp-loop", daemon=True
+        )
         self._initialized = False
+        self._stopped = False
 
-    def _run_event_loop(self):
+    def _run_event_loop(self) -> None:
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
 
-    def start(self):
-        """Initialize the hub and start the background event loop."""
+    def start(self) -> bool:
         if not _MCP_AVAILABLE:
-            logger.warning("[MCP] Skipping hub start: dependency missing (%s)", _MCP_ERROR)
+            logger.warning("[MCP] SDK unavailable: %s", _MCP_ERROR)
             return False
+        if self._stopped:
+            logger.warning("[MCP] Hub was stopped; construct a new hub to restart.")
+            return False
+        if self._initialized:
+            return True
         if not self._thread.is_alive():
             self._thread.start()
-        
-        if not self._initialized:
-            logger.info("[MCP] Starting Hub initialization...")
-            future = asyncio.run_coroutine_threadsafe(self._init_servers(), self._loop)
-            return future.result()
-        return True
+        task = asyncio.run_coroutine_threadsafe(self._init_servers(), self._loop)
+        try:
+            return bool(task.result(timeout=45))
+        except (Exception, FutureTimeout):
+            task.cancel()
+            logger.error("[MCP] Hub initialization failed", exc_info=True)
+            return False
 
-    async def _init_servers(self):
-        """Load configuration and connect to all enabled MCP servers."""
-        if not Path(self.config_path).exists():
-            logger.warning(f"[MCP] Config not found: {self.config_path}")
-            return
-
-        with open(self.config_path, "r") as f:
-            config = json.load(f)
-            self._servers = config.get("mcpServers", {})
-
-        for name, cfg in self._servers.items():
-            if cfg.get("enabled", True):
-                try:
-                    await self._connect_to_server(name, cfg)
-                except Exception as e:
-                    logger.error(f"[MCP] Failed to connect to server '{name}': {e}")
-        
+    async def _init_servers(self) -> bool:
+        config_file = Path(self.config_path)
+        if not config_file.is_file():
+            logger.warning("[MCP] Configuration file not found: %s", config_file)
+            return False
+        with config_file.open("r", encoding="utf-8") as stream:
+            data = json.load(stream)
+        self._servers = data.get("mcpServers", {})
+        for name, settings in self._servers.items():
+            if not settings.get("enabled", True):
+                continue
+            try:
+                await self._connect_to_server(name, settings)
+            except Exception:
+                logger.error("[MCP] Failed connecting to server %s", name, exc_info=True)
         self._initialized = True
-        logger.info(f"[MCP] Hub initialized with {len(self._sessions)} active servers.")
+        logger.info("[MCP] Connected to %d server(s)", len(self._sessions))
+        return bool(self._sessions)
 
-    async def _connect_to_server(self, name: str, cfg: Dict):
-        """Establish a stdio connection to an MCP server."""
+    async def _connect_to_server(self, name: str, settings: Dict[str, Any]) -> None:
         params = StdioServerParameters(
-            command=cfg["command"],
-            args=cfg.get("args", []),
-            env=cfg.get("env", None)
+            command=settings["command"],
+            args=settings.get("args", []),
+            env=_server_environment(settings.get("env")),
         )
-        
-        logger.info(f"[MCP] Connecting to server '{name}' via: {cfg['command']} {' '.join(cfg.get('args', []))}")
-        transport_ctx = stdio_client(params)
-        read, write = await transport_ctx.__aenter__()
-        
-        session = ClientSession(read, write)
-        await session.initialize()
-        
-        # Phase 21.2: Send initialized notification
-        await session.send_notification("notifications/initialized")
-        logger.info(f"[MCP] Session for '{name}' initialized.")
-        
-        # Store session and tools
-        self._sessions[name] = session
-        tools_list = await session.list_tools()
-        
-        for tool in tools_list.tools:
-            tool_id = f"mcp:{name}:{tool.name}"
-            self._tools[tool_id] = {
-                "server": name,
-                "original_name": tool.name,
-                "description": tool.description,
-                "input_schema": tool.inputSchema
-            }
-            logger.info(f"[MCP] Discovered tool: {tool_id}")
+        logger.info("[MCP] Connecting to configured server '%s'", name)
+        client = Client(params)
+        await client.__aenter__()
+        try:
+            cursor = None
+            discovered = {}
+            while True:
+                listing = await client.list_tools(cursor=cursor)
+                for tool in listing.tools:
+                    tool_id = f"mcp:{name}:{tool.name}"
+                    discovered[tool_id] = {
+                        "server": name,
+                        "original_name": tool.name,
+                        "description": tool.description,
+                        "input_schema": tool.input_schema,
+                    }
+                cursor = listing.next_cursor
+                if cursor is None:
+                    break
+        except BaseException:
+            await client.__aexit__(None, None, None)
+            raise
+        self._sessions[name] = client
+        self._tools.update(discovered)
+        logger.info("[MCP] Server '%s' offers %d tools", name, len(discovered))
 
     def get_available_tools(self) -> Dict[str, Any]:
-        """Return a mapping of discovered tools with their metadata."""
-        return self._tools
+        return dict(self._tools)
 
     def call_tool(self, tool_id: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """Synchronously call an MCP tool via the background loop."""
-        if tool_id not in self._tools:
-            return {"success": False, "error": f"Tool '{tool_id}' not found."}
-        
-        tool_data = self._tools[tool_id]
-        server_name = tool_data["server"]
-        session = self._sessions.get(server_name)
-        
-        if not session:
-            return {"success": False, "error": f"Server '{server_name}' is not connected."}
-
+        tool = self._tools.get(tool_id)
+        if tool is None:
+            return {"success": False, "error": f"Unknown MCP tool: {tool_id}"}
+        client = self._sessions.get(tool["server"])
+        if client is None or self._stopped:
+            return {"success": False, "error": "MCP server disconnected"}
         future = asyncio.run_coroutine_threadsafe(
-            session.call_tool(tool_data["original_name"], arguments), 
-            self._loop
+            client.call_tool(tool["original_name"], arguments), self._loop
         )
-        
         try:
             result = future.result(timeout=30)
-            return {"success": True, "output": result.content}
-        except Exception as e:
-            logger.error(f"[MCP] Tool execution failed ({tool_id}): {e}")
-            return {"success": False, "error": str(e)}
+            return {
+                "success": not bool(getattr(result, "is_error", False)),
+                "output": result.content,
+            }
+        except FutureTimeout:
+            future.cancel()
+            return {"success": False, "error": "MCP tool exceeded 30-second timeout"}
+        except Exception as exc:
+            logger.error("[MCP] Tool %s failed: %s", tool_id, exc)
+            return {"success": False, "error": str(exc)}
 
-    def stop(self):
-        """Gracefully shut down all MCP sessions."""
+    def stop(self) -> bool:
+        if self._stopped:
+            return True
+        self._stopped = True
+        if not self._thread.is_alive():
+            self._loop.close()
+            return True
         future = asyncio.run_coroutine_threadsafe(self._cleanup(), self._loop)
-        future.result()
-        self._loop.call_soon_threadsafe(self._loop.stop)
+        try:
+            future.result(timeout=20)
+        except Exception:
+            future.cancel()
+            logger.error("[MCP] Cleanup incomplete", exc_info=True)
+        finally:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+            self._thread.join(timeout=5)
+            if not self._thread.is_alive():
+                self._loop.close()
+        return not self._thread.is_alive()
 
-    async def _cleanup(self):
-        for name, session in self._sessions.items():
+    async def _cleanup(self) -> None:
+        for name, client in reversed(list(self._sessions.items())):
             try:
-                # In a real implementation, we'd exit the transport context here
-                pass 
-            except:
-                pass
+                await client.__aexit__(None, None, None)
+            except Exception:
+                logger.error("[MCP] Failed closing client for server %s", name, exc_info=True)
         self._sessions.clear()
+        self._tools.clear()
+        self._initialized = False
 
-# Global singleton
+
 _hub: Optional[MCPHub] = None
 
-def get_mcp_hub() -> MCPHub:
+
+def get_mcp_hub():
     global _hub
-    if _hub is None:
-        if not _MCP_AVAILABLE:
-            _hub = NoopMCPHub(_MCP_ERROR)
-            return _hub
-        _hub = MCPHub()
+    if _hub is None or getattr(_hub, "_stopped", False):
+        _hub = MCPHub() if _MCP_AVAILABLE else NoopMCPHub(_MCP_ERROR)
     return _hub
