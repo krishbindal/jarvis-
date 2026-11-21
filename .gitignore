@@ -44,3 +44,4 @@ scratch/
 # Local contacts (PII) — use data/contacts.example.json as a template
 data/contacts.json
 .jarvis_fix_backup/
+data/generated_skills_pending/
