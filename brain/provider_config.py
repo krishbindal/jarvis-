@@ -1,10 +1,13 @@
 """Centralized AI provider configuration for JARVIS-X."""
 
+import os
+
 # ── Model tiers ──────────────────────────────────────────────
 FAST_MODEL = "llama-3.1-8b-instant"          # Quick narration, acks
 PRIMARY_MODEL = "llama-3.1-8b-instant"       # Default light 8B model for fast command interpretation and planning
 FALLBACK_MODEL = "llama-3.3-70b-versatile"    # Heavier 70B model for complex fallback only
-GEMINI_MODEL = "gemini-2.0-flash"            # Fast, lightweight free tier cloud model
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")  # Published stable model; override if unavailable
+VISION_MODEL = os.getenv("JARVIS_VISION_MODEL", GEMINI_MODEL)
 
 # ── Temperatures ─────────────────────────────────────────────
 COMMAND_TEMP = 0.1       # Structured JSON — low creativity
