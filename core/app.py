@@ -71,6 +71,9 @@ class JarvisApp:
         self._ui_overlay = None
         self._activation_event = threading.Event()
         self._events = EventBus()
+        from core.action_policy import get_action_approvals
+        get_action_approvals().configure(self._events)
+        self._events.subscribe("interrupt_autonomy", lambda *_: get_action_approvals().cancel_all())
         self._events.subscribe("jarvis_wake", self._handle_activation)
         self._events.subscribe("command_received", self._handle_command)
         self._events.subscribe("proactive_warning", lambda msg: speak(msg))
@@ -840,6 +843,8 @@ class JarvisApp:
     # --─ Shutdown --------------------------------------------
 
     def _shutdown(self) -> None:
+        from core.action_policy import get_action_approvals
+        get_action_approvals().set_ui_ready(False)
         self._running = False
         # Stop File Sorcerer (Phase 23)
         try:
