@@ -104,3 +104,17 @@ The conversational `WAKE_WORD` and the separately configured OpenWakeWord `WAKE_
 Also install a Vosk English recognition model in the folder selected by `VOICE_MODEL_PATH` (default `voice/model`). Voice is unavailable until that Vosk model exists; the text UI can still be used. Run `python main.py --doctor` to inspect dependencies and configuration.
 
 CI includes a Windows Python 3.11 dependency installation and unit-test job. It does not validate microphone hardware, wake-word accuracy, speakers, or actual desktop automation; test those on the target Windows machine before a release.
+
+### Optional MCP integration and execution security
+
+The MCP hub is **disabled by default**. Install its separate dependency only if needed:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-mcp.txt
+```
+
+Set `JARVIS_ENABLE_MCP_HUB=1` in your local `.env`, and review every enabled command in `config/mcp_servers.json` before starting Jarvis. MCP servers execute with the permissions of your Windows user account. The launcher filters inherited environment variables to avoid passing API keys by default, but any variables deliberately added in an MCP server's `env` configuration are available to that server.
+
+**Dynamic Python execution is not a security sandbox.** `JARVIS_ALLOW_CODE_EXECUTION=0` is the default and should remain off unless you have reviewed and approved the code you will execute. Even when enabled, the separate temporary folder, `sys.executable -I`, and filtered environment do **not** restrict access to your files, network, or Windows permissions. Do not let an LLM autonomously execute untrusted code.
+
+The local n8n notification server remains disabled until `N8N_NOTIFY_TOKEN` is set. When enabled, it authenticates incoming requests, binds to loopback by default, limits payload size, and uses bounded socket reads. For future centralized action approvals and an emergency stop, see [issue #17](https://github.com/krishbindal/jarvis-/issues/17).
