@@ -5,6 +5,7 @@ performance metrics are generated; every number comes from the current process.
 """
 from __future__ import annotations
 
+import gc
 import json
 import os
 from pathlib import Path
@@ -68,17 +69,31 @@ def main() -> int:
         print(json.dumps(result, indent=2))
         return 0
     finally:
-        # Emit an explicit cleanup trace so a native Qt process exit is
-        # distinguishable from a successful benchmark with teardown errors.
-        print("[CI-QT] cleanup: started", file=sys.stderr, flush=True)
-        if overlay is not None:
-            overlay.close()
-            print("[CI-QT] cleanup: overlay closed", file=sys.stderr, flush=True)
-        if window is not None:
-            window.close()
-            print("[CI-QT] cleanup: main closed", file=sys.stderr, flush=True)
-        app.quit()
-        print("[CI-QT] cleanup: done", file=sys.stderr, flush=True)
+        # Qt wrappers must be destroyed while QApplication is still alive.
+        # EventBus callbacks otherwise retain SignalBridge/QWidget references
+        # past the QApplication lifetime, sometimes causing native teardown errors.
+        print("[CI-QT] cleanup: begin", file=sys.stderr, flush=True)
+        try:
+            if overlay is not None:
+                overlay._timer.stop()
+                overlay.close()
+                overlay.deleteLater()
+            if window is not None:
+                window._typing_timer.stop()
+                window._timer.stop()
+                window._stats_timer.stop()
+                window.close()
+                window.deleteLater()
+            with bus._lock:
+                bus._handlers.clear()
+            app.processEvents()
+            overlay = None
+            window = None
+            gc.collect()
+            print("[CI-QT] cleanup: widgets released", file=sys.stderr, flush=True)
+        finally:
+            app.quit()
+            print("[CI-QT] cleanup: QApplication quit", file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":
