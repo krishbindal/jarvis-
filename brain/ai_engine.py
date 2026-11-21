@@ -16,6 +16,7 @@ from utils.logger import get_logger
 from config import MODEL_NAME, GEMINI_API_KEY, GROQ_API_KEY
 from utils.system_context import get_system_stats
 from core.mcp_hub import get_mcp_hub
+from brain.provider_config import VISION_MODEL
 from brain.providers import registry
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
@@ -162,7 +163,7 @@ def describe_screen(prompt: str = "What is on the screen?") -> str:
         img = Image.open(img_path)
         
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model=VISION_MODEL,
             contents=[prompt, img]
         )
         return response.text.strip()
