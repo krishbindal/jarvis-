@@ -21,8 +21,13 @@ def main(argv=None) -> int:
 
     # Keep diagnostics and autostart maintenance independent of GUI/audio imports.
     if args.doctor:
-        from utils.diagnostics import run_diagnostics
-        return 0 if run_diagnostics() else 1
+        try:
+            from utils.diagnostics import run_diagnostics
+            return 0 if run_diagnostics() else 1
+        except (ValueError, TypeError) as exc:
+            print(f"Invalid configuration: {exc}", file=sys.stderr)
+            print("Check environment variables and your .env file.", file=sys.stderr)
+            return 1
 
     if args.install_autostart or args.remove_autostart:
         from utils.startup import enable_autostart, disable_autostart

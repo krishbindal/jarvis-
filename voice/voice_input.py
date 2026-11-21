@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import io
+import queue
 import wave
 import requests
 import os
@@ -87,7 +88,11 @@ class VoiceListener:
         self._last_audio_ts = time.time()
         self._last_speaking_ts = 0.0  # Echo suppression (Phase 32)
         self._silence_start_ts = time.time()
-        self._max_listen_time = 7.0 # Total listening window before force-flush
+        self._max_listen_time = 7.0  # Maximum time measured from each wake event
+        # Audio must be processed outside PortAudio's real-time callback.
+        self._audio_queue = queue.Queue(maxsize=32)
+        self._audio_worker: Optional[threading.Thread] = None
+        self._dropped_frames = 0
         
         if self._event_bus:
             self._event_bus.subscribe("jarvis_wake", self._on_jarvis_wake)
@@ -130,9 +135,9 @@ class VoiceListener:
         try:
             import openwakeword
             from openwakeword.model import Model as OWWModel
-            openwakeword.utils.download_models()
-            self._oww_model = OWWModel(wakeword_models=[config.WAKE_WORD], inference_framework="onnx")
-            logger.info(f"[VOICE] OpenWakeWord model '{config.WAKE_WORD}' loaded into VoiceListener.")
+            # Models are provisioned separately; never download during app startup.
+            self._oww_model = OWWModel(wakeword_models=[config.WAKE_MODEL_NAME], inference_framework="onnx")
+            logger.info("[VOICE] OpenWakeWord model '%s' loaded.", config.WAKE_MODEL_NAME)
         except Exception as exc:
             logger.warning("[VOICE] OpenWakeWord failed to load: %s", exc)
 
@@ -195,7 +200,9 @@ class VoiceListener:
         logger.info("[VOICE] JARVIS WAKE signal received. Starting command listener...")
         
         self._listening_for_command = True
-        
+        # Begin the utterance timeout at activation, not object construction.
+        self._silence_start_ts = now
+
         # Clear old audio buffer
         with self._buffer_lock:
             self._audio_buffer = io.BytesIO()
@@ -216,9 +223,28 @@ class VoiceListener:
             self._last_speaking_ts = time.time()
 
     def _callback(self, indata, frames, time_info, status):
-        """Audio callback from sounddevice."""
-        if status:
-            logger.debug("Audio status: %s", status)
+        """Queue a short audio frame; ML and event handlers run on a worker."""
+        try:
+            self._audio_queue.put_nowait(bytes(indata))
+        except queue.Full:
+            self._dropped_frames += 1
+
+    def _drain_audio(self):
+        """Process microphone frames without blocking PortAudio."""
+        while self._running or not self._audio_queue.empty():
+            try:
+                frame = self._audio_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            try:
+                self._process_audio(frame)
+            except Exception:
+                logger.error("[VOICE] Audio processing failed", exc_info=True)
+            finally:
+                self._audio_queue.task_done()
+
+    def _process_audio(self, audio_bytes: bytes):
+        """Handle voice detection, recognition and event delivery in a worker thread."""
 
         # ── Voice Barge-In Detection ──────────────────────────
         # If Jarvis is speaking and the user starts talking loudly,
@@ -227,7 +253,7 @@ class VoiceListener:
         if self._is_jarvis_speaking:
             try:
                 import numpy as np
-                audio_array = np.frombuffer(bytes(indata), dtype=np.int16)
+                audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
                 rms = np.sqrt(np.mean(audio_array.astype(np.float32) ** 2))
                 # Threshold tuned to ignore speaker bleed but catch real speech
                 if rms > 1500:
@@ -249,7 +275,7 @@ class VoiceListener:
         if self.ambient_mode and not self._listening_for_command:
             if self._oww_model:
                 import numpy as np
-                audio_array = np.frombuffer(bytes(indata), dtype=np.int16)
+                audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
                 try:
                     prediction = self._oww_model.predict(audio_array)
                     for model_name, score in prediction.items():
@@ -276,7 +302,6 @@ class VoiceListener:
             # Drop audio if wake word hasn't triggered
             return
 
-        audio_bytes = bytes(indata)
         self._last_audio_ts = time.time()
         
         # Add to buffer for online use
@@ -299,6 +324,12 @@ class VoiceListener:
                 full_audio = self._audio_buffer.getvalue()
                 self._audio_buffer = io.BytesIO()
 
+            # Reset listening state before any cloud transcription begins.
+            # An early cloud-return must never leave Jarvis stuck in listening mode.
+            if self.ambient_mode:
+                self._listening_for_command = False
+            self._silence_start_ts = time.time()
+
             def process_voice():
                 final_text = offline_text
                 
@@ -312,13 +343,6 @@ class VoiceListener:
                     if online_text and len(online_text.strip()) > 2:
                         logger.info(f"[VOICE] Groq polished: '{online_text}' (Vosk said: '{offline_text}')")
                         final_text = online_text
-                
-                # Keep listening permanently in "Always Listening" mode
-                if self.ambient_mode:
-                    self._listening_for_command = False
-                
-                # Reset phrase time tracker
-                self._silence_start_ts = time.time()
                 
                 if self._event_bus:
                     self._event_bus.emit("command_complete")
@@ -363,6 +387,8 @@ class VoiceListener:
                 logger.info("[VOICE] Available audio devices:\n%s", devices)
             except Exception:
                 pass
+        finally:
+            self._running = False
 
     def start(self):
         if self._running or self.model is None or self.rec is None:
@@ -371,10 +397,18 @@ class VoiceListener:
             logger.warning("[VOICE] sounddevice missing; voice listener disabled.")
             return
         self._running = True
+        self._audio_worker = threading.Thread(
+            target=self._drain_audio, name="voice-audio-worker", daemon=True
+        )
+        self._audio_worker.start()
         self._thread = threading.Thread(target=self._run, name="voice-listener-thread", daemon=True)
         self._thread.start()
 
     def stop(self):
         self._running = False
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=1.0)
+        if self._thread and self._thread.is_alive() and self._thread is not threading.current_thread():
+            self._thread.join(timeout=2.0)
+        if self._audio_worker and self._audio_worker.is_alive() and self._audio_worker is not threading.current_thread():
+            self._audio_worker.join(timeout=2.0)
+        if self._dropped_frames:
+            logger.warning("[VOICE] Dropped %d audio frames due to worker backlog", self._dropped_frames)

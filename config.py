@@ -10,6 +10,20 @@ except Exception:  # noqa: BLE001
 # Load environment variables from .env file
 load_dotenv()
 
+def _env_int(name: str, default: int, low: int | None = None, high: int | None = None) -> int:
+    """Parse bounded integers with a useful configuration error."""
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(raw)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"{name} must be an integer, got {raw!r}") from exc
+    if low is not None and value < low:
+        raise ValueError(f"{name} must be at least {low}, got {value}")
+    if high is not None and value > high:
+        raise ValueError(f"{name} must be at most {high}, got {value}")
+    return value
+
+
 # Clap detection
 CLAP_THRESHOLD = 0.35
 CLAP_MIN_GAP_S = 0.5
@@ -18,7 +32,8 @@ CLAP_COOLDOWN_S = 2.5
 CLAP_CALIBRATION_S = 2.0
 
 # Voice
-WAKE_WORD = "jarvis"
+WAKE_WORD = os.getenv("WAKE_WORD", "jarvis")
+WAKE_MODEL_NAME = os.getenv("WAKE_MODEL_NAME", "hey jarvis")
 VOICE_MODEL_PATH = os.getenv("VOICE_MODEL_PATH", "voice/model")
 
 # AI Models
@@ -29,7 +44,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 # n8n Integration
 N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "http://localhost:5678/webhook/action")
 N8N_NOTIFY_HOST = os.getenv("N8N_NOTIFY_HOST", "127.0.0.1")  # Loopback only by default
-N8N_NOTIFY_PORT = int(os.getenv("N8N_NOTIFY_PORT", "5001"))  # Internal port for n8n to JARVIS communication
+N8N_NOTIFY_PORT = _env_int("N8N_NOTIFY_PORT", 5001, 1, 65535)  # Internal port for n8n to JARVIS communication
 # Shared secret required to accept inbound notifications. Empty => server disabled.
 N8N_NOTIFY_TOKEN = os.getenv("N8N_NOTIFY_TOKEN", "")
 
@@ -61,13 +76,13 @@ ALLOW_AUTO_PIP = _env_flag("JARVIS_ALLOW_AUTO_PIP", False)
 
 # Downloads
 DOWNLOAD_DIR = os.getenv("JARVIS_DOWNLOAD_DIR", os.path.expanduser("~/Downloads"))
-MAX_DOWNLOAD_BYTES = int(os.getenv("JARVIS_MAX_DOWNLOAD_BYTES", str(500 * 1024 * 1024)))  # 500 MB
+MAX_DOWNLOAD_BYTES = _env_int("JARVIS_MAX_DOWNLOAD_BYTES", 500 * 1024 * 1024, 1)  # 500 MB
 
 # Communication (Gmail Defaults)
 EMAIL_USER = os.getenv("EMAIL_USER", "your-email@gmail.com")
 EMAIL_PASS = os.getenv("EMAIL_PASS", "")  # Use App Password
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_PORT = _env_int("SMTP_PORT", 587, 1, 65535)
 
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
