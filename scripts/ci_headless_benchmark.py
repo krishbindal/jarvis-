@@ -15,6 +15,11 @@ import time
 
 def main() -> int:
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    # Running a script by path puts scripts/ rather than the repository root
+    # on sys.path; resolve imports independent of the caller's working directory.
+    root = str(Path(__file__).resolve().parents[1])
+    if root not in sys.path:
+        sys.path.insert(0, root)
     import psutil
 
     proc = psutil.Process()
