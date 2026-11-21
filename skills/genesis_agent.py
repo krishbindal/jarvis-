@@ -7,7 +7,8 @@ import os
 import re
 from typing import Any, Dict
 from utils.logger import get_logger
-from config import GROQ_API_KEY, ALLOW_CODE_EXECUTION
+from config import GROQ_API_KEY, ENABLE_SKILL_GENERATION
+from skills.skill_staging import stage_skill_candidate
 import sys
 import importlib
 
@@ -29,72 +30,34 @@ REQUIREMENTS FOR JARVIS-X SKILLS:
 1. Must define `SKILL_NAME` (string, simple lowercase).
 2. Must define `SKILL_DESCRIPTION` (string).
 3. Must define `SKILL_PATTERNS` (list of regex strings to match user inputs related to the skill).
-4. Must define `def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:`
-5. The `execute` function must return a dictionary: {{"success": bool, "status": "success"|"error", "message": "What to say", "output": Any}}
-
-Output ONLY the raw Python code. No markdown code blocks like ```python, no explanations. Just python code. Use absolute imports.
-Make the code flawless. If it needs external standard libraries like requests, json, os, urllib, use them.
-"""
-
-def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
-    """Generates a new python skill using Groq, saves it, and hot reloads."""
-    if not ALLOW_CODE_EXECUTION:
+4. Must define `def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Generate a candidate without installing or importing model-written code."""
+    if not ENABLE_SKILL_GENERATION:
         return {"success": False, "status": "disabled",
-                "message": "Genesis Mode writes and loads new code; it is disabled for safety. "
-                           "Set JARVIS_ALLOW_CODE_EXECUTION=1 to enable it."}
+                "message": "Skill proposal generation is disabled. Set JARVIS_ENABLE_SKILL_GENERATION=1 to opt in."}
     if not GROQ_API_KEY:
-        return {"success": False, "status": "error", "message": "Genesis mode requires GROQ_API_KEY to write high-speed code."}
-
-    logger.info(f"[GENESIS] Initiating evolution protocol for: {target}")
-    
+        return {"success": False, "status": "config_required",
+                "message": "A Groq API key is required to generate a candidate skill."}
     try:
         from groq import Groq
-        client = Groq(api_key=GROQ_API_KEY)
+        client = Groq(api_key=GROQ_API_KEY, timeout=20.0)
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": GENESIS_PROMPT.format(request=target)}],
             temperature=0.2,
         )
-        
-        raw_code = completion.choices[0].message.content.strip()
-        
-        # Remove potential markdown
+        raw_code = (completion.choices[0].message.content or "").strip()
         if raw_code.startswith("```python"):
             raw_code = raw_code[9:]
         if raw_code.startswith("```"):
             raw_code = raw_code[3:]
         if raw_code.endswith("```"):
             raw_code = raw_code[:-3]
-            
         raw_code = raw_code.strip()
-        
-        # Extract the SKILL_NAME to use as filename
-        match = re.search(r'SKILL_NAME\s*=\s*["\']([^"\']+)["\']', raw_code)
+        match = re.search(r'SKILL_NAME\\s*=\\s*["\\\']([^"\\\']+)["\\\']', raw_code)
         if not match:
-            return {"success": False, "status": "error", "message": "Generated skill was invalid. No SKILL_NAME found."}
-            
-        skill_name = match.group(1).replace(" ", "_").lower()
-        file_path = os.path.join(os.path.dirname(__file__), f"{skill_name}_agent.py")
-        
-        # Save the skill
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(raw_code)
-            
-        logger.info(f"[GENESIS] Skill saved to {file_path}")
-        
-        # Force Hot-Reload
-        import skills
-        # Invalidate module caches
-        importlib.invalidate_caches()
-        skills.discover_skills()
-        
-        return {
-            "success": True,
-            "status": "success",
-            "message": f"Genesis complete. I have successfully written and learned the {skill_name} skill. It is now active.",
-            "output": raw_code
-        }
-        
-    except Exception as e:
-        logger.error(f"[GENESIS] Evolution failed: {e}")
-        return {"success": False, "status": "error", "message": f"Genesis protocol failed: {e}"}
+            return {"success": False, "status": "error", "message": "Generated candidate has no SKILL_NAME."}
+        return stage_skill_candidate(raw_code, match.group(1))
+    except Exception as exc:
+        logger.error("[GENESIS] Candidate generation failed: %s", exc)
+        return {"success": False, "status": "error", "message": "Skill generation failed. Check local logs."}
