@@ -13,9 +13,10 @@ from google import genai
 from groq import Groq
 
 from utils.logger import get_logger
-from config import MODEL_NAME, GEMINI_API_KEY, GROQ_API_KEY
+from config import MODEL_NAME, GEMINI_API_KEY, GROQ_API_KEY, ALLOW_CLOUD_VISION
 from utils.system_context import get_system_stats
 from core.mcp_hub import get_mcp_hub
+from brain.provider_config import VISION_MODEL
 from brain.providers import registry
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
@@ -121,6 +122,9 @@ def _format_relevant(relevant: Iterable[Dict[str, Any]] | None) -> str:
 
 def describe_screen(prompt: str = "What is on the screen?") -> str:
     """Analyze the last captured screen using Gemini Vision (Cloud) for speed on low-end PCs."""
+    if not ALLOW_CLOUD_VISION:
+        return "Cloud screen analysis is disabled; set JARVIS_ALLOW_CLOUD_VISION=1 only if you consent to sending screenshots."
+
     img_path = "assets/memory/last_screen.png"
     
     # Capture screen on-demand if it does not exist or is stale (older than 5 seconds)
@@ -162,7 +166,7 @@ def describe_screen(prompt: str = "What is on the screen?") -> str:
         img = Image.open(img_path)
         
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model=VISION_MODEL,
             contents=[prompt, img]
         )
         return response.text.strip()
