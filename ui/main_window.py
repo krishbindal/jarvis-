@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QGraphicsDropShadowEffect,
+    QMessageBox,
 )
 
 from utils import EventBus
@@ -36,6 +37,7 @@ class SignalBridge(QObject):
     stream_signal = Signal(dict)
     cinematic_signal = Signal(dict)
     progress_signal = Signal(dict)
+    approval_signal = Signal(dict)
 
 class JarvisWindow(QMainWindow):
     """Modern, Glassmorphism-themed window for JARVIS-X."""
@@ -56,6 +58,7 @@ class JarvisWindow(QMainWindow):
         self.signals.stream_signal.connect(self._on_stream_output)
         self.signals.cinematic_signal.connect(self._on_cinematic_log)
         self.signals.progress_signal.connect(self._on_command_progress)
+        self.signals.approval_signal.connect(self._on_action_approval)
 
         self._setup_glass_effect()
         self._build_layout()
@@ -66,6 +69,7 @@ class JarvisWindow(QMainWindow):
             self._events.subscribe("stream_output", self.signals.stream_signal.emit)
             self._events.subscribe("cinematic_log", self.signals.cinematic_signal.emit)
             self._events.subscribe("command_progress", self.signals.progress_signal.emit)
+            self._events.subscribe("action_approval_requested", self.signals.approval_signal.emit)
         self._drag_pos = QPoint()
         self._streaming = False
         self._typing_timer = QTimer(self)
@@ -73,6 +77,8 @@ class JarvisWindow(QMainWindow):
         self._type_queue = []
         self._current_line = ""
         self._type_index = 0
+        from core.action_policy import get_action_approvals
+        get_action_approvals().set_ui_ready(True)
 
     def _setup_glass_effect(self) -> None:
         """Enable Windows 11 Acrylic effect if available."""
@@ -165,6 +171,40 @@ class JarvisWindow(QMainWindow):
         if event.buttons() == Qt.LeftButton:
             self.move(event.globalPos() - self._drag_pos)
             event.accept()
+
+    @Slot(dict)
+    def _on_action_approval(self, payload: dict) -> None:
+        """Show a real local user confirmation, never auto-approve LLM input."""
+        from core.action_policy import get_action_approvals
+        request_id = payload.get("request_id", "")
+        action = str(payload.get("action", "unknown"))
+        summary = str(payload.get("summary", ""))[:180]
+        if not isinstance(request_id, str) or not request_id:
+            return
+        if not self.isVisible():
+            self.show()
+            self.raise_()
+            self.activateWindow()
+
+        box = QMessageBox(self)
+        box.setWindowTitle("JARVIS — approval required")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setTextFormat(Qt.TextFormat.PlainText)
+        box.setText(
+            f"Jarvis requests permission to perform:\n{action}\n\n"
+            f"Target: {summary}\n\n"
+            "Only approve if you intentionally asked for this specific action. "
+            "If uncertain, choose No."
+        )
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        approved = box.exec() == QMessageBox.StandardButton.Yes
+        get_action_approvals().respond(request_id, approved)
+
+    def closeEvent(self, event) -> None:
+        from core.action_policy import get_action_approvals
+        get_action_approvals().set_ui_ready(False)
+        super().closeEvent(event)
 
     def _emit_command(self) -> None:
         text = self.command_input.text().strip()
