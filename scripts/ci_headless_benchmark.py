@@ -28,6 +28,7 @@ def main() -> int:
     rss_before = proc.memory_info().rss
 
     from PySide6.QtWidgets import QApplication
+    from PySide6.QtGui import QFontDatabase
     from utils.events import EventBus
     from ui.main_window import JarvisWindow
     from ui.overlay import JarvisOverlay
@@ -76,6 +77,13 @@ def main() -> int:
             "commit": os.environ.get("GITHUB_SHA"),
             "platform": platform.platform(),
             "python": platform.python_version(),
+            "headless_font_diagnostics": {
+                # A CI rendering can lack user-desktop fonts and show missing glyphs.
+                "family_count": len(QFontDatabase.families()),
+                "has_segoe_ui": "Segoe UI" in QFontDatabase.families(),
+                "has_arial": "Arial" in QFontDatabase.families(),
+                "font_samples": QFontDatabase.families()[:12],
+            },
             "ui_smoke_checks": {
                 "required_dashboard_widgets": 5,
                 "literal_text_not_html": True,
