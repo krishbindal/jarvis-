@@ -66,6 +66,8 @@ class JarvisApp:
     def __init__(self, auto_start: bool = False) -> None:
         self.auto_start = auto_start
         self._running = True
+        # One command at a time; reject overlaps instead of racing on context.
+        self._command_gate = threading.BoundedSemaphore(1)
         self._ui_app = None
         self._ui_window = None
         self._ui_overlay = None
@@ -268,16 +270,50 @@ class JarvisApp:
     # --─ Command Pipeline ------------------------------------
 
     def _handle_command(self, payload: dict) -> None:
-        """
-        Master command handler with structured logging (Phase 8).
-        Now runs in a background thread to prevent EventBus/UI blocking.
-        """
-        threading.Thread(
-            target=self._process_command_threaded,
-            args=(payload,),
-            name="command-processor",
-            daemon=True
-        ).start()
+        """Accept at most one active command; interruption always stays available."""
+        if not isinstance(payload, dict) or not isinstance(payload.get("text"), str):
+            self._events.emit("command_result", {
+                "success": False, "status": "invalid_input",
+                "message": "Please enter a text command.",
+            })
+            return
+
+        text = payload["text"].strip().lower()
+        if not text:
+            return
+        if not self._command_gate.acquire(blocking=False):
+            if text in ("stop", "cancel", "abort", "stop everything", "kill task"):
+                from core.action_policy import get_action_approvals
+                get_action_approvals().cancel_all()
+                self._events.emit("interrupt_tts", {"source": "app_internal"})
+                self._events.emit("interrupt_autonomy", {"source": "user"})
+                self._events.emit("command_result", {
+                    "success": False,
+                    "status": "interrupt_requested",
+                    "message": "Interrupt requested. External actions may still be finishing.",
+                })
+            else:
+                self._events.emit("command_result", {
+                    "success": False, "status": "busy",
+                    "message": "A task is already running. Wait for its result or request Stop.",
+                })
+            return
+
+        def worker() -> None:
+            try:
+                self._process_command_threaded(payload)
+            finally:
+                self._command_gate.release()
+
+        try:
+            threading.Thread(target=worker, name="command-processor", daemon=True).start()
+        except Exception:
+            self._command_gate.release()
+            logger.error("[APP] Could not start command worker", exc_info=True)
+            self._events.emit("command_result", {
+                "success": False, "status": "error",
+                "message": "Jarvis could not start the command worker.",
+            })
 
     def _process_command_threaded(self, payload: dict) -> None:
         """Internal worker for actual command execution."""
@@ -412,11 +448,14 @@ class JarvisApp:
                 logger.info("[ACTION] Executing: %s target='%s'", action, target)
                 exec_result = execute_action(action, target, extra)
                 result["exec_result"] = exec_result
-                result["message"] = exec_result.get("message", result.get("message", ""))
-                self._context.update_after_action(action, target, extra, exec_result)
+                result["success"] = exec_result.get("success") is True
+                result["status"] = exec_result.get("status", "unverified")
+                result["message"] = exec_result.get("message") or "The executor returned no verified outcome."
+                if result["success"]:
+                    self._context.update_after_action(action, target, extra, exec_result)
 
                 # Phase 24: Log usage for habits
-                if action in ["open_app", "open_url", "trigger_n8n"]:
+                if result["success"] and action in ("open_app", "open_url", "trigger_n8n"):
                     self._db.log_usage(action, target)
 
                 # -- [EXECUTION] Log result ------------------─
@@ -432,8 +471,11 @@ class JarvisApp:
                 }]
 
                 # Record in session for context awareness (Phase 6)
-                session.record(action, target, app=extra.get("app"))
+                if result["success"]:
+                    session.record(action, target, app=extra.get("app"))
 
+            if action == "noop":
+                result.update({"success": False, "status": "not_executed", "message": "No action was requested."})
             self._events.emit("command_result", result)
 
             final_result = result
@@ -482,6 +524,7 @@ class JarvisApp:
             "goal": plan.goal or raw_text,
             "steps": result.get("steps", []),
             "status": result.get("status"),
+            "success": result.get("success") is True,
             "message": result.get("message"),
             "source": plan.source,
         }
