@@ -128,3 +128,15 @@ If the Qt UI is absent or closes, actions needing approval are **denied** rather
 Clipboard monitoring (`JARVIS_ENABLE_CLIPBOARD_MONITOR=1`) alone neither uploads nor persists clipboard contents. Those require separate `JARVIS_ALLOW_CLOUD_CLIPBOARD=1` and `JARVIS_REMEMBER_CLIPBOARD=1` settings, respectively. Autonomous local screen snapshots require `JARVIS_ALLOW_LOCAL_SCREEN_SNAPSHOTS=1`; screen files remain on the device until you delete them. Command-text logging defaults off (`JARVIS_LOG_COMMAND_TEXT=0`).
 
 **Limitations:** Other features can still explicitly send text to configured AI providers, and memory/history persist in local SQLite. These settings are controls for the specified automatic flows, not a full data-loss prevention system or a security boundary.
+
+## Evidence-based actions and refreshed dashboard
+
+The dashboard includes a mission-control HUD, a plain-text event timeline, a privacy summary drawn from the actual `.env` controls, explicit execution status, Run/Talk/Stop controls, and suggestions that **only fill** the command field. Its console inserts literal text to avoid treating user or tool output as HTML.
+
+**Execution result contract:** A tool must return a structured dictionary containing `success: true` or `success: false`. Missing/contradictory status is treated as unverified or failure. AI-proposed messages are never used as proof that a file was changed, a browser opened, a message sent, or the task finished. For multi-step and agent flows, Jarvis states how many executor steps reported success and when work stopped. Tool reports are not independent proof of external state.
+
+**Model hallucinations:** No AI can be guaranteed hallucination-free. Unsupported actions, non-existent skills, malformed parameters, self-granted approvals, overlong plans, and model-generated Python without a separate opt-in are rejected. Jarvis only runs one command at a time to avoid shared-state races. Informational AI answers are labeled **not independently verified**.
+
+The Windows GitHub Actions job measures selected-module code coverage and performs a real headless PySide6 widget smoke test, saving `jarvis-dashboard-headless.png` when the offscreen platform supports it. This screenshot does not prove on-screen rendering or real Windows automation on your laptop.
+
+See [release-readiness checklist](docs/RELEASE_READINESS.md) for hardware, API-provider and desktop validation that CI cannot establish.
