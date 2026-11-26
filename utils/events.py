@@ -25,6 +25,22 @@ class EventBus:
         with self._lock:
             self._handlers[event].append(handler)
 
+    def unsubscribe(self, event: str, handler: EventHandler) -> bool:
+        """Remove a registered callback so closed widgets are never retained."""
+        with self._lock:
+            callbacks = self._handlers.get(event)
+            if not callbacks:
+                return False
+            # Equality supports Qt/Python bound-method wrappers whose identity
+            # need not be stable across attribute accesses.
+            for index, callback in enumerate(callbacks):
+                if callback == handler:
+                    callbacks.pop(index)
+                    if not callbacks:
+                        self._handlers.pop(event, None)
+                    return True
+        return False
+
     def emit(self, event: str, *args, **kwargs) -> None:
         """Emit an event to all subscribers with debug logging."""
         with self._lock:
@@ -39,10 +55,14 @@ class EventBus:
 
 # Singleton Registry
 _event_bus: Optional[EventBus] = None
+_event_bus_lock = threading.Lock()
+
 
 def get_event_bus() -> EventBus:
-    """Return the global EventBus singleton."""
+    """Create the shared EventBus once even when multiple workers race."""
     global _event_bus
     if _event_bus is None:
-        _event_bus = EventBus()
+        with _event_bus_lock:
+            if _event_bus is None:
+                _event_bus = EventBus()
     return _event_bus
