@@ -1,207 +1,164 @@
-"""
-JARVIS-X Phase 27: Communication Protocol
-Skill: Sends Emails via SMTP and WhatsApp messages via PyWhatKit.
-"""
+"""Consent-gated communication skill with truthful delivery states.
 
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import pywhatkit
-import threading
-from typing import Any, Dict
-import config
-from utils.logger import get_logger
+The skill dispatcher requires user confirmation before calling execute().
+SMTP acceptance is reported as acceptance, not proof of inbox delivery.
+WhatsApp links only prefill a draft; Jarvis never silently presses Send.
+"""
+from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
+import smtplib
+import ssl
+from email.message import EmailMessage
+from typing import Any, Dict
+from urllib.parse import quote
+import webbrowser
+
+import config
+from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 SKILL_NAME = "communication"
-SKILL_DESCRIPTION = "Send emails and WhatsApp messages to contacts."
+SKILL_DESCRIPTION = "Submit email via SMTP or open a WhatsApp draft for user review."
 SKILL_PATTERNS = [
-    r"(?:send\s+)?(?:an\s+)?email\s+to\s+([\w\.-]+@[\w\.-]+\.\w+)\s+(?:saying|content|message)\s+(.*)$",
-    r"(?:send\s+)?(?:a\s+)?whatsapp\s+(?:message\s+)?to\s+([\w\d\+\s]+)\s+(?:saying|content|message)\s+(.*)$",
-    r"(?:message|text|tell)\s+([\w\s]+?)\s+(?:saying|that|message)?\s*(.*)$",
-    r"whatsapp\s+([\w\d\+\s]+)\s+(.*)$"
+    r"(?:send\s+)?(?:an\s+)?email\s+to\s+([\w.+-]+@[\w.-]+\.\w+)\s+(?:saying|content|message)\s+(.*)$",
+    r"(?:send\s+)?(?:a\s+)?whatsapp\s+(?:message\s+)?to\s+([\w\d+\s]+)\s+(?:saying|content|message)\s+(.*)$",
+    r"(?:message|text|tell)\s+([\w\s]+?)\s+(?:saying|that|message)\s+(.*)$",
+    r"whatsapp\s+([\w\d+\s]+)\s+(.*)$",
 ]
 
-def _resolve_contact(identifier: str) -> str:
-    """Resolve a name or phone number to a WhatsApp-compatible string."""
-    identifier = identifier.strip().lower()
-    
-    # If it looks like a phone number already, return as-is
-    if identifier.startswith("+") or (identifier.isdigit() and len(identifier) > 5):
-        return identifier
-        
-    # Otherwise, check contacts.json and contacts_cache.json
+_ROOT = Path(__file__).resolve().parents[1]
+_MAX_MESSAGE_CHARS = 10000
+
+
+def _resolve_contact(identifier: str) -> str | None:
+    """Resolve an explicit international number or locally saved contact."""
+    name = identifier.strip()
+    if name.startswith("+") and name[1:].isdigit():
+        return name
+    if name.isdigit():
+        return name
+    for path in (_ROOT / "data" / "contacts.json", _ROOT / "memory" / "contacts_cache.json"):
+        try:
+            if not path.is_file():
+                continue
+            with path.open("r", encoding="utf-8") as source:
+                contacts = json.load(source)
+            if isinstance(contacts, dict):
+                for key, value in contacts.items():
+                    if isinstance(key, str) and key.casefold() == name.casefold() and isinstance(value, str):
+                        return value.strip()
+        except (OSError, ValueError, TypeError):
+            logger.warning("[COMMUNICATION] Could not read local contacts file %s", path.name)
+    return None
+
+
+def _smtp_submit(to_email: str, body: str) -> Dict[str, Any]:
+    """Attempt SMTP submission synchronously in the existing command worker."""
+    user = config.EMAIL_USER
+    password = config.EMAIL_PASS
+    if not user or not password or "your-email" in user or "your-app-password" in password:
+        return {
+            "success": False,
+            "status": "config_required",
+            "message": "Email credentials are not configured; nothing was sent.",
+        }
+
+    message = EmailMessage()
+    message["From"] = user
+    message["To"] = to_email
+    message["Subject"] = "Message from JARVIS-X"
+    message.set_content(body)
+
     try:
-        paths = [Path("data/contacts.json"), Path("memory/contacts_cache.json")]
-        for p in paths:
-            if p.exists():
-                with open(p, "r") as f:
-                    contacts = json.load(f)
-                    match = contacts.get(identifier)
-                    if match:
-                        return match
-    except Exception as e:
-        logger.error(f"[COMMUNICATION] Contact lookup failed: {e}")
-        
-    return identifier # Fallback to identifier if no match found
-
-def _send_email_async(to_email: str, body: str) -> None:
-    """Internal helper to send email without blocking the main event loop."""
-    try:
-        user = config.EMAIL_USER
-        password = config.EMAIL_PASS
-        
-        if not password or "your-app-password" in password:
-            logger.warning("[COMMUNICATION] EMAIL_PASS not set. Email sending skipped.")
-            return
-
-        msg = MIMEMultipart()
-        msg['From'] = user
-        msg['To'] = to_email
-        msg['Subject'] = "Message from JARVIS-X"
-        msg.attach(MIMEText(body, 'plain'))
-
-        server = smtplib.SMTP(config.SMTP_SERVER, config.SMTP_PORT)
-        server.starttls()
-        server.login(user, password)
-        server.send_message(msg)
-        server.quit()
-        logger.info(f"[COMMUNICATION] Email successfully sent to {to_email}")
-    except Exception as e:
-        logger.error(f"[COMMUNICATION] Email failed: {e}")
-
-def _smart_desktop_send(platform: str, recipient: str, message: str) -> bool:
-    """Automate desktop app interactions using Vision to find search bars."""
-    import time
-    try:
-        import pyautogui
-        from brain.vision_provider import get_vision_provider
-        from executor.system_executor import open_app
-        
-        # 1. Open the app
-        open_app(platform)
-        time.sleep(3) # Wait for app to load/focus
-        
-        # 2. Find Search Bar
-        vision = get_vision_provider()
-        search_prompt = f"The search bar or 'New Chat' button in {platform} Windows App"
-        coords = vision.find_element(search_prompt)
-        
-        if not coords:
-            logger.warning(f"[COMMUNICATION] Could not find search bar for {platform} via Vision. Trying Ctrl+F.")
-            pyautogui.hotkey('ctrl', 'f')
-        else:
-            pyautogui.click(coords[0], coords[1])
-            
-        time.sleep(0.5)
-        
-        # 3. Type Name and Select
-        pyautogui.write(recipient, interval=0.05)
-        time.sleep(1)
-        pyautogui.press('enter')
-        time.sleep(1)
-        
-        # 4. Type Message and Send
-        pyautogui.write(message, interval=0.01)
-        pyautogui.press('enter')
-        
-        # 5. Cache success
-        cache_path = Path("memory/contacts_cache.json")
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache = {}
-        if cache_path.exists():
-            with open(cache_path, "r") as f:
-                cache = json.load(f)
-        
-        cache[recipient.lower()] = recipient # Store the search term
-        with open(cache_path, "w") as f:
-            json.dump(cache, f, indent=4)
-            
-        logger.info(f"[COMMUNICATION] Smart Send complete for {recipient} on {platform}")
-        return True
-    except Exception as e:
-        logger.error(f"[COMMUNICATION] Smart Send failed: {e}")
-        return False
-
-def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
-    """Execute communication task based on patterns."""
-    import re
-    
-    # Try Email Matching
-    email_match = re.search(SKILL_PATTERNS[0], target, re.IGNORECASE)
-    if email_match:
-        to_email = email_match.group(1)
-        body = email_match.group(2)
-        
-        if "your-email" in config.EMAIL_USER or not config.EMAIL_PASS:
+        with smtplib.SMTP(config.SMTP_SERVER, config.SMTP_PORT, timeout=15) as server:
+            server.starttls(context=ssl.create_default_context())
+            server.login(user, password)
+            rejected = server.send_message(message)
+        if rejected:
             return {
                 "success": False,
-                "status": "config_required",
-                "message": "Sir, I need your Gmail App Password to send emails. Please update the .env file."
+                "status": "smtp_rejected",
+                "message": "The SMTP server refused at least one recipient. Delivery was not confirmed.",
             }
-
-        threading.Thread(target=_send_email_async, args=(to_email, body), daemon=True).start()
         return {
             "success": True,
-            "status": "success",
-            "message": f"I've initiated the email to {to_email}, Sir. It will be sent in the background."
+            "status": "smtp_accepted",
+            "message": (
+                f"SMTP server accepted the message for {to_email}. "
+                "Inbox delivery and reading have not been verified."
+            ),
         }
-
-    # Try WhatsApp/Instagram/Text Matching
-    wa_match = (
-        re.search(SKILL_PATTERNS[1], target, re.IGNORECASE) or 
-        re.search(SKILL_PATTERNS[2], target, re.IGNORECASE) or 
-        re.search(SKILL_PATTERNS[3], target, re.IGNORECASE)
-    )
-    
-    # Check for direct platform mention
-    is_insta = "instagram" in target.lower()
-    platform = "instagram" if is_insta else "whatsapp"
-    
-    if wa_match:
-        recipient = wa_match.group(1).strip(" .!,?")
-        message = wa_match.group(2).strip(" .!,?")
-        
-        phone = _resolve_contact(recipient)
-        
-        # If it's a phone number or a resolved contact, use URI
-        if phone.startswith("+") or phone.isdigit():
-             try:
-                import urllib.parse
-                import os
-                
-                encoded_msg = urllib.parse.quote(message)
-                whatsapp_uri = f"whatsapp://send?phone={phone}&text={encoded_msg}"
-                
-                def _launch_wa():
-                    try:
-                        os.startfile(whatsapp_uri)
-                        time.sleep(2)
-                        import pyautogui
-                        pyautogui.press('enter') # Send it
-                    except Exception as e:
-                        logger.warning(f"[COMMUNICATION] URI failed: {e}")
-
-                threading.Thread(target=_launch_wa, daemon=True).start()
-                return {"success": True, "message": f"Sending WhatsApp to {phone}..."}
-             except Exception:
-                 pass
-
-        # SMART SEARCH FALLBACK (Normal Names / 100+ Contacts case)
-        threading.Thread(target=_smart_desktop_send, args=(platform, recipient, message), daemon=True).start()
-        
+    except (smtplib.SMTPException, OSError, TimeoutError) as exc:
+        logger.warning("[COMMUNICATION] SMTP submission failed (%s)", type(exc).__name__)
         return {
-            "success": True,
-            "status": "success",
-            "message": f"I'm searching for {recipient} on {platform} and sending your message, Sir."
+            "success": False,
+            "status": "smtp_failed",
+            "message": "SMTP submission failed. No successful delivery was confirmed.",
         }
+
+
+def _whatsapp_draft(recipient: str, body: str) -> Dict[str, Any]:
+    phone = _resolve_contact(recipient)
+    digits = phone[1:] if isinstance(phone, str) and phone.startswith("+") else ""
+    if not digits.isdigit() or not 8 <= len(digits) <= 15:
+        return {
+            "success": False,
+            "status": "recipient_unresolved",
+            "message": (
+                "I cannot verify the recipient's international phone number. "
+                "Use + followed by the country code and phone number, or a saved contact."
+            ),
+        }
+    url = f"https://wa.me/{digits}?text={quote(body)}"
+    try:
+        opened = webbrowser.open(url)
+    except (OSError, ValueError) as exc:
+        logger.warning("[COMMUNICATION] Failed to open draft (%s)", type(exc).__name__)
+        opened = False
+    if not opened:
+        return {
+            "success": False,
+            "status": "draft_not_opened",
+            "message": "Could not open a WhatsApp draft. No message was sent.",
+        }
+    return {
+        "success": False,
+        "status": "awaiting_manual_send",
+        "message": "Requested a WhatsApp draft. Review the recipient and press Send yourself; delivery is not confirmed.",
+    }
+
+
+def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Parse an explicit recipient and refuse ambiguous or unverified delivery."""
+    if not isinstance(target, str):
+        return {"success": False, "status": "invalid_request", "message": "A text instruction is required."}
+
+    email_match = re.search(SKILL_PATTERNS[0], target, re.IGNORECASE | re.DOTALL)
+    if email_match:
+        body = email_match.group(2).strip()
+        if not body or len(body) > _MAX_MESSAGE_CHARS:
+            return {"success": False, "status": "invalid_message", "message": "Email message must be 1–10000 characters."}
+        return _smtp_submit(email_match.group(1), body)
+
+    match = None
+    if "instagram" not in target.lower():
+        for expression in SKILL_PATTERNS[1:]:
+            match = re.search(expression, target, re.IGNORECASE | re.DOTALL)
+            if match:
+                break
+
+    if match:
+        body = match.group(2).strip()
+        if not body or len(body) > _MAX_MESSAGE_CHARS:
+            return {"success": False, "status": "invalid_message", "message": "Message must be 1–10000 characters."}
+        return _whatsapp_draft(match.group(1), body)
 
     return {
         "success": False,
         "status": "unrecognized",
-        "message": "I understood you want to communicate, but I couldn't parse the recipient or message correctly."
+        "message": "I couldn't verify a recipient and message. Nothing was sent.",
     }
