@@ -68,8 +68,14 @@ class EvidenceOnlyTests(unittest.TestCase):
             root = Path(folder)
             (root / "memory").mkdir()
             path = root / "memory" / "jarvis.db"
-            with sqlite3.connect(path) as connection:
+            connection = sqlite3.connect(path)
+            try:
                 connection.execute("CREATE TABLE interactions (id INTEGER PRIMARY KEY)")
+                connection.commit()
+            finally:
+                # SQLite context managers commit but do not close the handle,
+                # which prevents Windows TemporaryDirectory cleanup.
+                connection.close()
             report = evidence.collect_evidence(root=root, environment={})
         db = next(c for c in report["checks"] if c["name"] == "Local memory database")
         self.assertEqual(db["status"], "observed")
