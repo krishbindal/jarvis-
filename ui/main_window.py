@@ -189,7 +189,7 @@ class JarvisWindow(QMainWindow):
             ("Cloud clipboard", config.ALLOW_CLOUD_CLIPBOARD),
         )
         self.privacy_label = QLabel(
-            "\\n".join(f"{name}: {'ON' if enabled else 'OFF'}" for name, enabled in privacy_items)
+            "\n".join(f"{name}: {'ON' if enabled else 'OFF'}" for name, enabled in privacy_items)
         )
         self.privacy_label.setObjectName("PrivacySummary")
         self.privacy_label.setWordWrap(True)
