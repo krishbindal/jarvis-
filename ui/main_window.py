@@ -371,6 +371,8 @@ class JarvisWindow(QMainWindow):
         reported_success = payload.get("success") is True
         if reported_success:
             label = "EXECUTOR REPORTED SUCCESS"
+        elif status == "ai_answer_unverified":
+            label = "AI ANSWER • FACTS NOT VERIFIED"
         elif payload.get("action") == "chat" and status == "unverified":
             label = "CHAT RESPONSE • NOT ACTION VERIFIED"
         elif status in ("busy", "interrupt_requested"):
