@@ -248,7 +248,11 @@ def _route_single(normalized: str) -> Dict:
     if not normalized:
         return _build("noop", "", "Empty command.")
 
-    logger.parsed(normalized)
+    from config import LOG_COMMAND_TEXT
+    if LOG_COMMAND_TEXT:
+        logger.parsed(normalized)
+    else:
+        logger.debug("[ROUTER] Parsing command (%d characters)", len(normalized))
 
     # -- 1. Greetings ------------------------------------------
     if normalized in _GREETINGS or any(normalized.startswith(g) for g in _GREETINGS):
