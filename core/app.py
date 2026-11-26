@@ -423,10 +423,20 @@ class JarvisApp:
                 logger.info("[ACTION] STOP! Resetting system state.")
                 self._events.emit("interrupt_tts", {"source": "app_internal"})
                 self._events.emit("interrupt_autonomy", {"source": "user"})
-                self._events.emit("overlay_state", {"state": "idle", "text": "Task Aborted."})
+                from core.action_policy import get_action_approvals
+                get_action_approvals().cancel_all()
+                self._events.emit("overlay_state", {"state": "idle", "text": "Interrupt requested."})
                 self._context.set_task(False)
                 self._context.clear()
-                self._interactions.finish("Sir, I have stopped all current processing.")
+                stop_result = {
+                    "action": "stop",
+                    "success": False,
+                    "status": "interrupt_requested",
+                    "message": "Stop requested. Speech and pending approvals were cancelled; external work may still finish.",
+                }
+                self._events.emit("command_result", stop_result)
+                self._interactions.finish(stop_result["message"])
+                final_result = stop_result
                 interaction_done = True
                 return
 
