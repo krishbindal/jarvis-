@@ -63,8 +63,11 @@ def _safe_name(raw: str, suffix: str | None = None) -> str:
 def _save_path_from_url(url: str, suffix: str | None = None) -> Path:
     parsed = urlparse(url)
     name = _safe_name(parsed.path.rsplit("/", 1)[-1] or "download", suffix)
-    resolved = (DEFAULT_DOWNLOAD_DIR / name).resolve()
-    resolved.relative_to(DEFAULT_DOWNLOAD_DIR)
+    # Windows Path.resolve() may expand 8.3 short names (RUNNER~1 -> full
+    # user name). Resolve both operands before checking containment.
+    root = DEFAULT_DOWNLOAD_DIR.resolve()
+    resolved = (root / name).resolve()
+    resolved.relative_to(root)
     return resolved
 
 
