@@ -8,6 +8,11 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
+
+if __package__ in (None, ""):
+    # Support both python -m diagnostics.final_report and direct script invocation.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from diagnostics.evidence import collect_evidence, render_markdown, write_report
 
