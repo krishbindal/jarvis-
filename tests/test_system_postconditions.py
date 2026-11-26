@@ -37,6 +37,29 @@ class FilesystemOutcomeTests(unittest.TestCase):
             self.assertTrue(deleted["success"], deleted)
             self.assertFalse((root / "tasks" / "renamed.txt").exists())
 
+    def test_move_copy_and_rename_refuse_overwriting_existing_files(self):
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            patch.object(executor, "_safe_path", side_effect=lambda path: Path(path)),
+            patch.object(executor, "_is_safe", return_value=True),
+        ):
+            root = Path(temp)
+            source = root / "source.txt"
+            dest = root / "existing.txt"
+            source.write_text("original source", encoding="utf-8")
+            dest.write_text("keep this", encoding="utf-8")
+
+            for action in (
+                lambda: executor.copy_file(str(source), str(dest)),
+                lambda: executor.move_file(str(source), str(dest)),
+                lambda: executor.rename_file(str(source), "existing.txt"),
+            ):
+                result = action()
+                self.assertFalse(result["success"], result)
+                self.assertEqual(result["status"], "already_exists")
+                self.assertEqual(source.read_text(encoding="utf-8"), "original source")
+                self.assertEqual(dest.read_text(encoding="utf-8"), "keep this")
+
     def test_copy_does_not_claim_success_when_destination_is_missing(self):
         with (
             tempfile.TemporaryDirectory() as temp,
