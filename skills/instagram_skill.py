@@ -1,53 +1,79 @@
-"""
-JARVIS-X Phase 27.5: Native Instagram Integration
-Skill: Launches the Instagram Desktop App on Windows.
-"""
+"""Instagram launcher with validated usernames and truthful open results."""
+from __future__ import annotations
 
 import os
-import threading
+import re
+import webbrowser
 from typing import Any, Dict
+from urllib.parse import quote
+
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
-
 SKILL_NAME = "instagram"
-SKILL_DESCRIPTION = "Open profiles or the home feed on the native Instagram Desktop app."
+SKILL_DESCRIPTION = "Request Instagram app/profile launch without claiming profile loaded."
 SKILL_PATTERNS = [
     r"(?:open\s+)?instagram\s*(?:for\s+)?(.*)?$",
-    r"insta\s*(.*)?$"
+    r"insta\s*(.*)?$",
 ]
+_USERNAME = re.compile(r"[A-Za-z0-9._]{1,30}\Z")
+
+
+def _parse_username(value: str) -> str | None:
+    """Only native Instagram usernames; strip the user command prefix."""
+    text = value.strip()
+    match = re.fullmatch(
+        r"(?:open\s+)?(?:instagram|insta)(?:\s+for)?(?:\s+(.+))?",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        text = (match.group(1) or "").strip()
+    text = text.removeprefix("@")
+    if not text:
+        return ""
+    if _USERNAME.fullmatch(text) is None:
+        return None
+    return text
+
 
 def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
-    """Launch Instagram Desktop app with target profile if provided."""
-    username = target.strip().replace("@", "")
-    
-    try:
-        # instagram://user?username=... for native PC apps
-        if username:
-            uri = f"instagram://user?username={username}"
-            msg = f"Opening {username}'s profile on Instagram, Sir."
-        else:
-            uri = "instagram://"
-            msg = "Launching the Instagram Desktop app, Sir."
-            
-        def _launch_insta():
-            os.startfile(uri)
-            logger.info(f"[INSTAGRAM] Launched URI: {uri}")
+    if not isinstance(target, str):
+        return {"success": False, "status": "invalid_request", "message": "A text target is required."}
 
-        threading.Thread(target=_launch_insta, daemon=True).start()
-        
+    username = _parse_username(target)
+    if username is None:
         return {
-            "success": True,
-            "status": "success",
-            "message": msg
+            "success": False,
+            "status": "invalid_username",
+            "message": "Instagram usernames may contain only letters, digits, periods and underscores (up to 30 characters).",
         }
-    except Exception as e:
-        # Fallback to browser if app is not installed or URI fails
-        import webbrowser
-        base_url = f"https://www.instagram.com/{username}" if username else "https://www.instagram.com"
-        webbrowser.open(base_url)
+
+    uri = "instagram://" if not username else "instagram://user?username=" + quote(username, safe="")
+    if hasattr(os, "startfile"):
+        try:
+            os.startfile(uri)
+            return {
+                "success": True,
+                "status": "launch_requested",
+                "message": "Instagram launch was handed to Windows. Page loading was not verified.",
+            }
+        except (OSError, ValueError):
+            logger.info("[INSTAGRAM] Native launch unavailable; using browser fallback")
+
+    url = "https://www.instagram.com/" + (quote(username, safe="") + "/" if username else "")
+    try:
+        accepted = webbrowser.open(url)
+    except (OSError, ValueError):
+        accepted = False
+    if not accepted:
         return {
-            "success": True,
-            "status": "success",
-            "message": f"I couldn't launch the PC app, Sir. Opening Instagram in your browser instead."
+            "success": False,
+            "status": "open_failed",
+            "message": "Neither Instagram nor a browser confirmed accepting the launch request.",
         }
+    return {
+        "success": True,
+        "status": "browser_open_requested",
+        "message": "Browser accepted the Instagram URL. Profile loading was not verified.",
+    }

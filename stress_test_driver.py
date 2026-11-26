@@ -1,18 +1,16 @@
-import os
-import sys
-import time
-import json
-from pathlib import Path
+"""Deterministic command-router checks. This is NOT an end-to-end stress test.
 
-# Add project root to path
-sys.path.append(str(Path(__file__).parent))
+Never claim external apps, messages, browser actions, or file operations have
+succeeded merely because a command mapped to an action name.
+"""
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+from time import perf_counter
 
 from core.command_router import route_command
-from executor.system_executor import execute_file_command
-from skills import execute_skill
-from utils.logger import get_logger
-
-logger = get_logger("STRESS_TEST")
 
 TEST_CASES = [
     # Phase 1: Multi-Step
@@ -54,62 +52,71 @@ TEST_CASES = [
     "send message to unknown person"
 ]
 
-def run_stress_test():
-    report = []
-    logger.info("="*50)
-    logger.info("STARTING UNIVERSAL STRESS TEST")
-    logger.info("="*50)
 
-    for i, cmd in enumerate(TEST_CASES, 1):
-        test_entry = {"id": i, "command": cmd, "status": "UNKNOWN", "steps": []}
-        logger.input(cmd)
-        
+def run_routing_check(output_path: Path | None = None) -> dict:
+    """Measure only route recognition, with explicit no-execution provenance."""
+    cases = []
+    for index, command in enumerate(TEST_CASES, start=1):
+        started = perf_counter()
         try:
-            start_time = time.time()
-            routes = route_command(cmd)
-            
-            # Handle list for multi-step
-            if not isinstance(routes, list):
-                routes = [routes]
-            
-            for step in routes:
-                action = step.get("action")
-                target = step.get("target")
-                stype = step.get("type")
-                
-                logger.action(f"{action} on {target} ({stype})")
-                
-                # Mock / Real Execution (we simulate success for the driver logic check)
-                # In a real run, this would call system_executor or skills
-                # Since we are "Hardened", we check if the route is valid.
-                if action != "unknown" and action != "noop":
-                    logger.execution(f"SUCCESS: Routed to {action}")
-                    test_entry["steps"].append({"action": action, "success": True})
-                else:
-                    logger.error(f"FAILURE: Unrecognized intent for '{cmd}'")
-                    test_entry["steps"].append({"action": action, "success": False})
+            routed = route_command(command)
+            steps = routed if isinstance(routed, list) else [routed]
+            actions = [
+                str(step.get("action", "unknown")) if isinstance(step, dict) else "unknown"
+                for step in steps
+            ]
+            recognized = bool(actions) and all(
+                action not in {"unknown", "noop", ""} for action in actions
+            )
+            result = {
+                "id": index,
+                "command": command,
+                "route_status": "ROUTED" if recognized else "UNROUTABLE",
+                "actions": actions,
+                "execution_attempted": False,
+                "elapsed_ms": round((perf_counter() - started) * 1000, 3),
+            }
+        except Exception as exc:
+            result = {
+                "id": index,
+                "command": command,
+                "route_status": "ROUTER_EXCEPTION",
+                "actions": [],
+                "execution_attempted": False,
+                "error_type": type(exc).__name__,
+                "elapsed_ms": round((perf_counter() - started) * 1000, 3),
+            }
+        cases.append(result)
 
-            elapsed = time.time() - start_time
-            test_entry["status"] = "PASSED" if all(s["success"] for s in test_entry["steps"]) else "FAILED"
-            test_entry["time"] = elapsed
-            
-        except Exception as e:
-            logger.error(f"CRASH: {str(e)}")
-            test_entry["status"] = "CRASHED"
-            test_entry["error"] = str(e)
-            
-        report.append(test_entry)
-        logger.info(f"Test {i}/{len(TEST_CASES)}: {test_entry['status']}")
-        logger.info("-" * 30)
+    report = {
+        "kind": "routing_only",
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "execution_attempted": False,
+        "hardware_validation": False,
+        "description": "Action names were parsed but no OS actions or external tasks ran.",
+        "results": cases,
+        "summary": {
+            "total_cases": len(cases),
+            "routed_cases": sum(x["route_status"] == "ROUTED" for x in cases),
+            "unroutable_cases": sum(x["route_status"] == "UNROUTABLE" for x in cases),
+            "router_exceptions": sum(x["route_status"] == "ROUTER_EXCEPTION" for x in cases),
+            "verified_completed_tasks": 0,
+        },
+    }
+    destination = Path(output_path) if output_path is not None else Path("artifacts/routing_check.json")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print(
+        f"Router-only checks: {report['summary']['routed_cases']}/{len(cases)} recognized. "
+        "NO external tasks were executed or verified."
+    )
+    return report
 
-    # Summary
-    passed = len([r for r in report if r["status"] == "PASSED"])
-    logger.info("="*50)
-    logger.info(f"STRESS TEST COMPLETE: {passed}/{len(TEST_CASES)} PASSED")
-    logger.info("="*50)
-    
-    with open("assets/logs/stress_test_report.json", "w") as f:
-        json.dump(report, f, indent=4)
+
+def run_stress_test() -> dict:
+    """Legacy entry point: run ROUTING checks only (not execution stress tests)."""
+    return run_routing_check()
+
 
 if __name__ == "__main__":
-    run_stress_test()
+    run_routing_check()

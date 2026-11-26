@@ -140,3 +140,13 @@ The dashboard includes a mission-control HUD, a plain-text event timeline, a pri
 The Windows GitHub Actions job measures selected-module code coverage and performs a real headless PySide6 widget smoke test, saving `jarvis-dashboard-headless.png` when the offscreen platform supports it. This screenshot does not prove on-screen rendering or real Windows automation on your laptop.
 
 See the [deep audit findings](docs/DEEP_AUDIT.md) and the [release-readiness checklist](docs/RELEASE_READINESS.md) for hardware, API-provider and desktop validation that CI cannot establish.
+
+### Source-backed research and honest launch status
+
+The `deep_research` skill currently retrieves **up to three real English Wikipedia article introductions** through the Wikimedia API. It includes the retrieved article URLs, labels those excerpts as a *limited encyclopedia overview*, and fails if it cannot retrieve any attributable sources. **This is not a comprehensive web search, real-time news research, independent fact-check, or guarantee that article content is accurate.** Jarvis no longer prompts an AI to pretend it searched the web or invent citations. An internet connection is required.
+
+The Instagram skill synchronously requests an app or browser launch and reports whether the operating system/browser accepted that request; it does **not** claim the profile loaded. Only valid Instagram usernames are accepted. Parsed commands in the LRU cache are now deep-copied on storage and lookup, so downstream execution cannot alter another command's cached target.
+
+### Honest routing-only diagnostic statistics
+
+`python stress_test_driver.py` now writes `artifacts/routing_check.json`, which reports **only command-parser recognition and measured parsing time**. It does not execute system actions or verify task completion. The old checked-in `assets/logs/stress_test_report.json` was removed because it labeled simulated routes as `PASSED`, which could be mistaken for real end-to-end test evidence. For actual automated execution tests, inspect GitHub Actions results and their commit SHAs; for microphone, browser and app-control validation, run the Windows acceptance checklist.
