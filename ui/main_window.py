@@ -360,25 +360,44 @@ class JarvisWindow(QMainWindow):
         self._append_log(f"USR > {text}")
         self.command_input.clear()
         self._events.emit("command_received", {"text": text})
-        self.status_label.setText("ANALYZING...")
+        self.status_label.setText("WAITING FOR TOOL RESULTS")
+        self.execution_label.setText("Command submitted; no action result has been confirmed yet.")
 
     @Slot(dict)
     def _on_command_result(self, payload: dict) -> None:
-        message = payload.get("message") or "Logic complete."
-        action = payload.get("action", "")
-        self._append_log(f"JARVIS > {message}")
-        self.status_label.setText("SYSTEM READY")
+        """Render the executor's status, not an unverified AI completion claim."""
+        message = str(payload.get("message") or "No execution result details.")[:500]
+        status = str(payload.get("status") or "unverified").lower()
+        reported_success = payload.get("success") is True
+        if reported_success:
+            label = "EXECUTOR REPORTED SUCCESS"
+        elif payload.get("action") == "chat" and status == "unverified":
+            label = "CHAT RESPONSE • NOT ACTION VERIFIED"
+        elif status in ("busy", "interrupt_requested"):
+            label = "ACTION WAITING / INTERRUPTED"
+        else:
+            label = "ATTENTION REQUIRED • NOT COMPLETED"
+        self.status_label.setText(label)
+        self.execution_label.setText(f"{status.upper()}: {message}")
+        self._append_log(f"JARVIS [{status.upper()}] > {message}")
         self._streaming = False
 
     def _append_log(self, line: str) -> None:
-        self.console.append(line)
+        """Insert user/tool text literally, never as rich-text HTML."""
+        cursor = self.console.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        if not self.console.document().isEmpty():
+            cursor.insertBlock()
+        cursor.insertText(str(line)[:8000])
+        self.console.setTextCursor(cursor)
+        self.console.ensureCursorVisible()
 
     @Slot(dict)
     def _on_stream_output(self, payload: dict) -> None:
         token = payload.get("token", "")
         reset = payload.get("reset", False)
         if reset or not self._streaming:
-            self.console.append("")
+            self._append_log("")
             self._streaming = True
         cursor = self.console.textCursor()
         cursor.movePosition(QTextCursor.End)
@@ -395,15 +414,17 @@ class JarvisWindow(QMainWindow):
     @Slot(dict)
     def _on_command_progress(self, payload: dict) -> None:
         text = payload.get("text", "")
-        if text:
-            self.status_label.setText(text.upper())
-            self._queue_type_line(f"[STATUS] {text}")
+        if isinstance(text, str) and text:
+            self.status_label.setText("RUNNING / " + text[:56].upper())
+            self.execution_label.setText("Progress reported; final task status not yet confirmed.")
+            self._queue_type_line(f"[STATUS] {text[:500]}")
 
     def _queue_type_line(self, text: str) -> None:
+        text = str(text)[:500]
         if self._typing_timer.isActive():
             self._type_queue.append(text)
             return
-        self.console.append("")
+        self._append_log("")
         self._current_line = text
         self._type_index = 0
         self._typing_timer.start(12)
@@ -413,7 +434,7 @@ class JarvisWindow(QMainWindow):
             self._typing_timer.stop()
             if self._type_queue:
                 next_line = self._type_queue.pop(0)
-                self.console.append("")
+                self._append_log("")
                 self._current_line = next_line
                 self._type_index = 0
                 self._typing_timer.start(12)
