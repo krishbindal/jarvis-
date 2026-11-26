@@ -1,18 +1,23 @@
-"""
-JARVIS-X Phase 21: Browser Autopilot
+"""Browser tasks with explicit context and evidence-based results.
 
-Skill: Automate browser tasks via Playwright.
-Handles: "search google for X", "go to URL", "read this page"
+Each Playwright task uses a fresh temporary browser session. It cannot inspect
+or control a tab in the user's already-open Chrome/Edge window. Commands that
+require an existing browser tab fail clearly instead of acting on about:blank.
 """
+from __future__ import annotations
 
-import threading
+import re
 from typing import Any, Dict
+from urllib.parse import quote_plus
+
+import webbrowser
+
+from core.target_safety import inspect_open_target
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
-
 SKILL_NAME = "browser"
-SKILL_DESCRIPTION = "Browser automation — 'search for React guides', 'go to github.com', 'read this page'"
+SKILL_DESCRIPTION = "Search Google, request browser URL opening, or read an explicitly supplied URL"
 SKILL_PATTERNS = [
     r"(?:google|search\s+(?:for|the\s+web\s+for|google\s+for))\s+(.+)",
     r"search\s+(.+?)(?:\s+on\s+(?:google|the\s+web))?$",
@@ -21,145 +26,165 @@ SKILL_PATTERNS = [
     r"browse\s+(?:to\s+)?(.+)",
     r"open\s+(?:and\s+)?search\s+(?:for\s+)?(.+)",
 ]
+_MAX_QUERY = 300
+_MAX_TEXT = 2000
+
+
+def _valid_url(text: str) -> str | None:
+    if not isinstance(text, str):
+        return None
+    url = text.strip()
+    if not url or len(url) > 2048 or any(c.isspace() for c in url):
+        return None
+    if "://" not in url:
+        url = "https://" + url
+    allowed, _, _ = inspect_open_target(url, "url")
+    return url if allowed else None
 
 
 def _run_browser_task(task_type: str, query: str) -> Dict[str, Any]:
-    """Execute browser automation in a sync context."""
+    """Report only observed browser acceptance or newly fetched page content."""
+    if task_type in {"scroll", "click_first", "extract"}:
+        return {
+            "success": False,
+            "status": "existing_tab_unavailable",
+            "message": (
+                "This command requires an existing browser tab, but this skill "
+                "does not attach to the user's active browser. No page was changed."
+            ),
+        }
+
+    if task_type == "navigate":
+        url = _valid_url(query)
+        if not url:
+            return {"success": False, "status": "invalid_url", "message": "Provide a valid http(s) URL or hostname."}
+        try:
+            accepted = webbrowser.open(url)
+        except (OSError, ValueError) as exc:
+            logger.warning("[BROWSER] Browser handoff failed (%s)", type(exc).__name__)
+            accepted = False
+        return {
+            "success": bool(accepted),
+            "status": "launch_requested" if accepted else "open_failed",
+            "message": (
+                f"Default browser accepted the URL {url}; page loading was not verified."
+                if accepted else "The default browser did not accept the URL; navigation was not verified."
+            ),
+        }
+
+    if task_type == "read":
+        url = _valid_url(query)
+        if not url:
+            return {
+                "success": False,
+                "status": "url_required",
+                "message": "Reading the current browser tab is unsupported. Supply the exact https:// URL.",
+            }
+    elif task_type == "search":
+        if not isinstance(query, str) or not query.strip() or len(query) > _MAX_QUERY:
+            return {"success": False, "status": "invalid_query", "message": "Search query must be 1–300 characters."}
+        url = "https://www.google.com/search?q=" + quote_plus(query.strip())
+    else:
+        return {"success": False, "status": "unsupported", "message": "Unsupported browser task."}
+
     try:
         from playwright.sync_api import sync_playwright
-
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)
-            page = browser.new_page()
-
-            if task_type == "search":
-                url = f"https://www.google.com/search?q={query}"
-                page.goto(url, wait_until="domcontentloaded", timeout=15000)
-
-                # Extract top results
-                results = []
-                items = page.query_selector_all("h3")
-                for item in items[:5]:
-                    text = item.inner_text()
-                    if text:
-                        results.append(text)
-
-                summary = "\n".join(f"• {r}" for r in results) if results else "No results found."
-
-                # Keep browser open for user
-                logger.info("[BROWSER] Search results: %s", summary[:200])
-                return {
-                    "success": True,
-                    "status": "success",
-                    "message": f"Here are the top results for '{query}':\n{summary}",
-                    "output": summary,
-                }
-
-            elif task_type == "navigate":
-                if not query.startswith("http"):
-                    query = f"https://{query}"
-                page.goto(query, wait_until="domcontentloaded", timeout=15000)
-                title = page.title()
-
-                return {
-                    "success": True,
-                    "status": "success",
-                    "message": f"Navigated to: {title}",
-                    "output": title,
-                }
-
-            elif task_type == "read":
-                # Get page text content
-                text = page.inner_text("body")
-                # Truncate to reasonable length
-                text = text[:2000] if text else "Could not read page content."
-
-                return {
-                    "success": True,
-                    "status": "success",
-                    "message": f"Page content (first 2000 chars):\n{text[:500]}...",
-                    "output": text,
-                }
-            
-            elif task_type == "scroll":
-                logger.execution("Scrolling browser...")
-                page.mouse.wheel(0, 800)
-                import time
-                time.sleep(2)
-                return {"success": True, "message": "Sir, I have scrolled down the page."}
-
-            elif task_type == "click_first":
-                logger.execution("Clicking first result...")
-                # Modern Google results often use h3 or specific anchor tags
-                selector = "h3 >> nth=0"
-                if page.query_selector(selector):
-                    page.click(selector)
-                    return {"success": True, "message": "Sir, I have opened the first result."}
-                return {"success": False, "message": "Could not find a clickable result."}
-
-            elif task_type == "extract":
-                logger.execution(f"Extracting data for: {query}")
-                # For weather/temp, LLM-based selector search or hardcoded common ones
-                if "weather" in query or "temperature" in query:
-                    temp = page.query_selector("#wob_tm") # Google specialized weather widget
-                    if temp:
-                        val = temp.inner_text()
-                        return {"success": True, "message": f"The current temperature is {val}°C, Sir."}
-                
-                # Generic fallback: just return truncated text
-                text = page.inner_text("body")[:500]
-                return {"success": True, "message": f"Extracted: {text}"}
-
     except ImportError:
         return {
             "success": False,
-            "status": "error",
-            "message": "Playwright not installed. Run: playwright install chromium",
+            "status": "dependency_missing",
+            "message": "Playwright is not installed. Install Chromium with: playwright install chromium",
         }
-    except Exception as e:
-        logger.error("[BROWSER] Task failed: %s", e)
-        return {"success": False, "status": "error", "message": f"Browser error: {e}"}
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                page = browser.new_page()
+                response = page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                if response is None or response.status >= 400:
+                    return {
+                        "success": False,
+                        "status": "fetch_failed",
+                        "message": "No successful HTTP response was observed; no content was verified.",
+                    }
+                if task_type == "read":
+                    text = (page.inner_text("body") or "").strip()
+                    if not text:
+                        return {"success": False, "status": "empty_page", "message": "No readable page text was observed."}
+                    excerpt = text[:_MAX_TEXT]
+                    return {
+                        "success": True,
+                        "status": "page_text_observed",
+                        "message": f"Retrieved {len(excerpt)} characters from {url}; accuracy not independently verified.",
+                        "output": excerpt,
+                        "source_url": url,
+                    }
+
+                headings = []
+                for item in page.query_selector_all("h3")[:5]:
+                    title = (item.inner_text() or "").strip()[:180]
+                    if title:
+                        headings.append(title)
+                if not headings:
+                    return {
+                        "success": False,
+                        "status": "no_observed_results",
+                        "message": "The search page loaded but no result headings were observed.",
+                    }
+                return {
+                    "success": True,
+                    "status": "search_headings_observed",
+                    "message": f"Observed {len(headings)} search headings; linked sources and claims were not independently checked.",
+                    "output": "\n".join(headings),
+                    "source_url": url,
+                }
+            finally:
+                browser.close()
+    except Exception as exc:
+        logger.warning("[BROWSER] Playwright task failed (%s)", type(exc).__name__)
+        return {
+            "success": False,
+            "status": "browser_error",
+            "message": f"Browser task failed ({type(exc).__name__}); no successful completion was verified.",
+        }
 
 
 def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
-    """Route browser commands."""
-    import re
-    target_lower = target.lower().strip()
+    """Route commands without assuming access to the currently active browser."""
+    if not isinstance(target, str) or not target.strip():
+        return {"success": False, "status": "invalid_request", "message": "A nonempty browser command is required."}
+    value = target.strip()
+    lower = value.lower()
 
-    target_lower = target.lower().strip()
-    logger.action(f"Browser Task: {target_lower}")
+    m = re.fullmatch(r"(?:go to|navigate to|browse to|browse)\s+(.+)", value, flags=re.IGNORECASE)
+    if m:
+        return _run_browser_task("navigate", m.group(1).strip())
 
-    # Advanced Multi-Step Handlers
-    if "open" in target_lower and "result" in target_lower:
-        return _run_browser_task("click_first", "")
-    
-    if "scroll" in target_lower:
-        return _run_browser_task("scroll", target_lower)
+    if lower.startswith(("scroll", "click", "open first result", "extract")):
+        # No persistent Playwright connection exists for the user's active tab.
+        operation = "scroll" if lower.startswith("scroll") else "click_first"
+        return _run_browser_task(operation, value)
 
-    if "extract" in target_lower or "weather" in target_lower:
-        return _run_browser_task("extract", target_lower)
+    m = re.fullmatch(
+        r"(?:read|summarize|scrape)(?:\s+(?:this|the))?\s+(?:page|website|article)(?:\s+(.+))?",
+        value, flags=re.IGNORECASE,
+    )
+    if m:
+        return _run_browser_task("read", (m.group(1) or "").strip())
 
-    # Detect task type
-    if any(w in target_lower for w in ["search", "google", "look up", "find"]):
-        # Extract search query
-        query = target_lower
-        for prefix in ["search for ", "google ", "search google for ", "search the web for ",
-                       "look up ", "find ", "search ", "open and search for "]:
-            if query.startswith(prefix):
-                query = query[len(prefix):]
-                break
-        return _run_browser_task("search", query.strip())
+    m = re.fullmatch(
+        r"(?:read|summarize|scrape)\s+(https?://\S+)", value, flags=re.IGNORECASE,
+    )
+    if m:
+        return _run_browser_task("read", m.group(1).strip())
 
-    elif any(w in target_lower for w in ["go to", "navigate", "browse to"]):
-        url = target_lower
-        for prefix in ["go to ", "navigate to ", "browse to ", "browse "]:
-            if url.startswith(prefix):
-                url = url[len(prefix):]
-                break
-        return _run_browser_task("navigate", url.strip())
-
-    elif any(w in target_lower for w in ["read", "summarize", "scrape"]):
-        return _run_browser_task("read", target_lower)
-
-    # Default: treat as search
-    return _run_browser_task("search", target_lower)
+    query = value
+    for prefix in (
+        "open and search for ", "search google for ", "search the web for ",
+        "search for ", "google ", "look up ", "find ", "search ",
+    ):
+        if lower.startswith(prefix):
+            query = value[len(prefix):].strip()
+            break
+    return _run_browser_task("search", query)
