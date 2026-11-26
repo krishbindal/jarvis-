@@ -23,6 +23,7 @@ from executor.system_executor import _native_open
 from core.mcp_hub import get_mcp_hub
 from core.action_policy import check_action
 from core.execution_evidence import normalize_executor_result
+from core.target_safety import inspect_open_target
 
 from executor.conversion_executor import convert_to_mp3, convert_to_pdf
 from executor.download_executor import download_file, download_video
@@ -111,6 +112,13 @@ def _open_dynamic_handler(target: str, extra: Optional[Dict] = None) -> Dict[str
     extra = extra or {}
     app = extra.get("app", "")
     resolved_type = extra.get("resolved_type", "url")
+    valid, needs_confirmation, explanation = inspect_open_target(target, resolved_type)
+    if not valid:
+        return {"success": False, "status": "unsafe_target", "message": explanation}
+    if needs_confirmation:
+        denied = check_action("open_executable", target)
+        if denied is not None:
+            return denied
 
     attempts = []
 
@@ -120,16 +128,20 @@ def _open_dynamic_handler(target: str, extra: Optional[Dict] = None) -> Dict[str
             logger.info("[EXEC] Attempt 1: Opening %s '%s' in '%s'", resolved_type, target, app)
             if app in ("chrome", "msedge", "firefox", "brave", "opera"):
                 try:
-                    webbrowser.get(app).open(target)
+                    opened = webbrowser.get(app).open(target)
                 except Exception:
-                    webbrowser.open(target)
+                    opened = False
+                if not opened:
+                    opened = webbrowser.open(target)
+                if not opened:
+                    raise RuntimeError("The browser did not accept the URL")
             elif app in ("code",):
                 subprocess.Popen(["code", target])
             else:
                 _native_open(target)
 
             return {"success": True, "status": "success",
-                    "message": f"Opening {target} in {app}", "output": target}
+                    "message": f"Launch requested for {target} in {app}; external state not verified.", "output": target}
         except Exception as exc:
             attempts.append(f"App launch failed ({app}): {exc}")
             logger.warning("[EXEC] Attempt 1 failed: %s", exc)
@@ -139,14 +151,14 @@ def _open_dynamic_handler(target: str, extra: Optional[Dict] = None) -> Dict[str
         logger.info("[EXEC] Attempt 2: Opening '%s' with system default", target)
         _native_open(target)
         return {"success": True, "status": "success",
-                "message": f"Opening {target}", "output": target}
+                "message": f"Launch request sent for {target}; external state not verified.", "output": target}
     except Exception as exc:
         attempts.append(f"System open failed: {exc}")
         logger.error("[EXEC] All attempts failed for '%s': %s", target, attempts)
 
     return {
         "success": False, "status": "error",
-        "message": f"Failed to open {target} after 3 attempts",
+        "message": f"Launch failed; {len(attempts)} available handler(s) failed.",
         "output": "; ".join(attempts),
     }
 
