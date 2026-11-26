@@ -9,7 +9,8 @@ from executor import system_executor as executor
 
 class FilesystemOutcomeTests(unittest.TestCase):
     def test_create_copy_move_rename_delete_verify_real_files(self):
-        with tempfile.TemporaryDirectory() as temp, (
+        with (
+            tempfile.TemporaryDirectory() as temp,
             patch.object(executor, "_safe_path", side_effect=lambda path: Path(path)),
             patch.object(executor, "_is_safe", return_value=True),
         ):
@@ -37,7 +38,8 @@ class FilesystemOutcomeTests(unittest.TestCase):
             self.assertFalse((root / "tasks" / "renamed.txt").exists())
 
     def test_copy_does_not_claim_success_when_destination_is_missing(self):
-        with tempfile.TemporaryDirectory() as temp, (
+        with (
+            tempfile.TemporaryDirectory() as temp,
             patch.object(executor, "_safe_path", side_effect=lambda path: Path(path)),
             patch.object(executor.shutil, "copy2", return_value=None),
         ):
