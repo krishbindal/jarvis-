@@ -46,12 +46,42 @@ def main() -> int:
         overlay.show()
         app.processEvents()
         qt_ms = (time.perf_counter() - qt_start) * 1000
+
+        # Functional dashboard smoke test: this checks real Qt widgets, not a
+        # static mockup or model-invented visual performance.
+        for name in ("status_label", "privacy_label", "execution_label", "command_input", "console"):
+            assert getattr(window, name, None) is not None, f"Missing dashboard widget: {name}"
+
+        window._prefill_command("system check")
+        assert window.command_input.text() == "system check"
+        window.command_input.clear()
+        window._append_log("<b>literal user text</b>")
+        assert "<b>literal user text</b>" in window.console.toPlainText()
+        window._on_command_result({
+            "status": "error", "success": False, "message": "Simulated denial",
+        })
+        assert "ATTENTION" in window.status_label.text()
+        window._on_command_result({
+            "status": "success", "success": True, "message": "Simulated tool result",
+        })
+        assert "REPORTED SUCCESS" in window.status_label.text()
+
+        # Screenshot is from actual headless Qt rendering, not an illustration.
+        preview = Path("artifacts") / "jarvis-dashboard-headless.png"
+        preview.parent.mkdir(parents=True, exist_ok=True)
+        preview_ok = bool(window.grab().save(str(preview), "PNG"))
         rss_after = proc.memory_info().rss
         result = {
             "environment": "GitHub Actions headless Qt offscreen (NOT a real Windows desktop)",
             "commit": os.environ.get("GITHUB_SHA"),
             "platform": platform.platform(),
             "python": platform.python_version(),
+            "ui_smoke_checks": {
+                "required_dashboard_widgets": 5,
+                "literal_text_not_html": True,
+                "failure_and_success_states_checked": True,
+                "headless_preview_written": preview_ok,
+            },
             "measured": {
                 "core_module_import_ms": round(modules_ms, 3),
                 "qt_construct_show_process_events_ms": round(qt_ms, 3),
