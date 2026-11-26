@@ -151,6 +151,14 @@ def move_file(src: str, dest: str) -> Dict:
         dest_path = _safe_path(dest)
         if dest_path.is_dir():
             dest_path = dest_path / source_path.name
+        dest_path = dest_path.resolve()
+        if not _is_safe(dest_path):
+            raise UnsafePathError(f"Destination is outside allowed directories: {dest_path}")
+        if not source_path.exists():
+            return {"success": False, "status": "error", "message": "Move source does not exist."}
+        if dest_path.exists() or source_path == dest_path:
+            return {"success": False, "status": "already_exists",
+                    "message": "Move refused: destination exists or matches source; no files were overwritten."}
         shutil.move(str(source_path), str(dest_path))
         if not dest_path.exists():
             return {"success": False, "status": "verification_failed",
@@ -168,6 +176,14 @@ def copy_file(src: str, dest: str) -> Dict:
         dest_path = _safe_path(dest)
         if dest_path.is_dir():
             dest_path = dest_path / source_path.name
+        dest_path = dest_path.resolve()
+        if not _is_safe(dest_path):
+            raise UnsafePathError(f"Destination is outside allowed directories: {dest_path}")
+        if not source_path.is_file():
+            return {"success": False, "status": "error", "message": "Copy source is not an existing file."}
+        if dest_path.exists() or source_path == dest_path:
+            return {"success": False, "status": "already_exists",
+                    "message": "Copy refused: destination exists or matches source; no files were overwritten."}
         shutil.copy2(str(source_path), str(dest_path))
         if not dest_path.is_file() or dest_path.stat().st_size != source_path.stat().st_size:
             return {"success": False, "status": "verification_failed",
@@ -185,6 +201,11 @@ def rename_file(path: str, new_name: str) -> Dict:
         dest = source.with_name(new_name)
         if not _is_safe(dest):
             raise ValueError(f"Path not allowed: {dest}")
+        if not source.exists():
+            return {"success": False, "status": "error", "message": "Rename source does not exist."}
+        if dest.exists() or source == dest:
+            return {"success": False, "status": "already_exists",
+                    "message": "Rename refused: destination already exists; no files were overwritten."}
         source.rename(dest)
         if not dest.exists():
             return {"success": False, "status": "verification_failed",
