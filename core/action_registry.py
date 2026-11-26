@@ -266,7 +266,11 @@ def execute_action(
                 break
 
     # Do not log complete Python scripts (they may contain credentials).
-    display_target = f"<{len(target)} chars of code>" if action == "execute_python" else str(target)[:160]
+    from config import LOG_COMMAND_TEXT
+    if action == "execute_python" or not LOG_COMMAND_TEXT:
+        display_target = f"<{len(str(target))} characters; private>"
+    else:
+        display_target = str(target)[:160]
     logger.info("[EXEC] action=%s target=%r", action, display_target)
 
     # Approval is controlled by the local Qt dialog, never by model-provided extra.
