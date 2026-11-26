@@ -1,70 +1,168 @@
-/* Jarvis Glassmorphism Style */
-
+/* JARVIS-X desktop dashboard — Qt-supported stylesheet properties only. */
 QMainWindow {
-    background-color: transparent;
+    background: transparent;
+    color: #E8F4F8;
+    font-family: "Segoe UI", "Arial", sans-serif;
 }
-
 QWidget#CentralWidget {
-    background: rgba(10, 20, 30, 160); /* Semi-transparent base */
-    border-radius: 20px;
-    border: 1px solid rgba(0, 255, 255, 60);
+    background-color: #08111E;
+    border: 1px solid #224257;
+    border-radius: 18px;
 }
-
+QLabel {
+    background: transparent;
+    color: #E8F4F8;
+}
 QLabel#Title {
-    color: #00ffff;
-    font-size: 26px;
-    font-weight: bold;
-    letter-spacing: 2px;
-    margin-bottom: 5px;
-    text-transform: uppercase;
+    color: #8EF5F4;
+    font-size: 23px;
+    font-weight: 800;
 }
-
-QLabel#Status {
-    color: #36d7ff;
-    font-size: 13px;
-    padding: 4px;
-    background: rgba(0, 0, 0, 100);
+QLabel#Subtitle {
+    color: #789AAD;
+    font-size: 10px;
+    font-weight: 600;
+}
+QLabel#HeaderHint {
+    color: #A4C2D5;
+    background: #12293B;
+    border: 1px solid #28516B;
+    padding: 7px 12px;
     border-radius: 8px;
+    font-size: 10px;
 }
-
-QLineEdit {
-    background: rgba(5, 15, 25, 200);
-    border: 1px solid rgba(0, 255, 255, 80);
-    border-radius: 12px;
-    padding: 14px;
-    color: #e0ffff;
-    font-size: 15px;
+QLabel#Eyebrow {
+    color: #58C7DA;
+    font-size: 11px;
+    font-weight: 700;
 }
-
-QLineEdit:focus {
-    border: 2px solid #00ffff;
-    background: rgba(5, 20, 35, 230);
+QLabel#InfoHeading {
+    color: #D7E9F3;
+    font-size: 12px;
+    font-weight: 700;
+    padding-top: 7px;
 }
-
-QTextEdit {
-    background: rgba(2, 8, 12, 180);
-    border: 1px solid rgba(0, 255, 255, 50);
-    border-radius: 15px;
+QLabel#Status {
+    color: #B1F9EC;
+    font-size: 21px;
+    font-weight: 700;
+    padding-bottom: 3px;
+}
+QLabel#Muted {
+    color: #8AA7B9;
+    font-size: 11px;
+}
+QLabel#Footer {
+    color: #648699;
+    font-size: 10px;
+    font-weight: 600;
+}
+QLabel#PrivacySummary {
+    color: #B5E6E5;
+    background: #0B2030;
+    border-left: 3px solid #2D9EA9;
+    border-radius: 5px;
     padding: 12px;
-    color: #9cf6ff;
-    font-family: "Consolas", "Courier New", monospace;
-    font-size: 14px;
+    font-size: 12px;
 }
-
-QPushButton {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #005f6a, stop:1 #002d33);
-    border: 1px solid #00ffff;
+QLabel#ExecutionSummary {
+    color: #E4F1FB;
+    background: #10243B;
+    border: 1px solid #23445A;
+    border-radius: 7px;
+    padding: 10px;
+    font-size: 12px;
+}
+QFrame#HeroPanel, QFrame#InfoPanel {
+    background: #0D1D2D;
+    border: 1px solid #254457;
+    border-radius: 14px;
+}
+QFrame#HeroPanel {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #102B3C, stop:1 #0A1727);
+}
+QFrame#CommandPanel {
+    background: #112536;
+    border: 1px solid #2B4A60;
+    border-radius: 13px;
+}
+QTextEdit#ActivityConsole {
+    background: #081724;
+    color: #D2E8F1;
+    border: 1px solid #27475B;
     border-radius: 12px;
-    color: #00ffff;
-    font-weight: bold;
-    padding: 10px 20px;
+    padding: 12px;
+    selection-background-color: #246A7C;
+    font: 12px "Cascadia Code", "Consolas", monospace;
 }
-
+QLineEdit#CommandInput {
+    background: #091926;
+    border: 1px solid #325369;
+    border-radius: 9px;
+    padding: 10px 13px;
+    color: #F1FCFE;
+    font-size: 13px;
+}
+QLineEdit#CommandInput:focus {
+    border: 2px solid #4ED3DB;
+    background: #0B1E2B;
+}
+QPushButton {
+    background: #153045;
+    color: #DAEEF6;
+    border: 1px solid #32566B;
+    border-radius: 8px;
+    padding: 9px 15px;
+    font-size: 12px;
+    font-weight: 600;
+}
 QPushButton:hover {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #007c8a, stop:1 #00414a);
-    box-shadow: 0 0 15px rgba(0, 255, 255, 150);
+    background: #1D4359;
+    border-color: #5AABB9;
 }
-
 QPushButton:pressed {
-    background: #002d33;
+    background: #0E2737;
+}
+QPushButton#PrimaryAction {
+    background: #3EC6CC;
+    color: #061E29;
+    border: 1px solid #6DF3E7;
+    font-weight: 800;
+}
+QPushButton#PrimaryAction:hover {
+    background: #6BE0E1;
+}
+QPushButton#SecondaryAction {
+    background: #143A4B;
+    border: 1px solid #45AFC2;
+    color: #9CF4F1;
+}
+QPushButton#StopAction {
+    background: #43212D;
+    border: 1px solid #895060;
+    color: #FFD2D4;
+}
+QPushButton#StopAction:hover {
+    background: #65313E;
+}
+QPushButton#Suggestion {
+    background: #112737;
+    color: #A8CBD9;
+    border: 1px solid #294C60;
+    font-size: 11px;
+    padding: 6px 11px;
+}
+QPushButton#WindowControl, QPushButton#WindowClose {
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 1px;
+    font-size: 18px;
+    color: #9BBACB;
+}
+QPushButton#WindowClose:hover {
+    background: #67303D;
+    color: #FFF1F0;
+}
+QPushButton#WindowControl:hover {
+    background: #254357;
 }

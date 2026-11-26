@@ -117,7 +117,10 @@ def create_folder(name: str, path: str | None = None) -> Dict:
         if not _is_safe(target):
             raise ValueError(f"Path not allowed: {target}")
         target.mkdir(parents=True, exist_ok=True)
-        logger.info("Folder ensured at %s", target)
+        if not target.is_dir():
+            return {"success": False, "status": "verification_failed",
+                    "message": "Folder creation returned but the directory was not found."}
+        logger.info("Folder verified at %s", target)
         return {"success": True, "status": "success", "message": f"Folder ensured at {target}", "output": str(target)}
     except Exception as exc:  # noqa: BLE001
         logger.error("Create folder failed for %s in %s: %s", name, path, exc)
@@ -132,6 +135,9 @@ def delete_file(path: str) -> Dict:
         if target.is_dir():
             return {"success": False, "status": "error", "message": "Refusing to delete directory."}
         target.unlink()
+        if target.exists():
+            return {"success": False, "status": "verification_failed",
+                    "message": "Delete operation returned but the file still exists."}
         logger.info("Deleted file %s", target)
         return {"success": True, "status": "success", "message": f"Deleted {target}", "output": str(target)}
     except Exception as exc:  # noqa: BLE001
@@ -145,7 +151,18 @@ def move_file(src: str, dest: str) -> Dict:
         dest_path = _safe_path(dest)
         if dest_path.is_dir():
             dest_path = dest_path / source_path.name
+        dest_path = dest_path.resolve()
+        if not _is_safe(dest_path):
+            raise UnsafePathError(f"Destination is outside allowed directories: {dest_path}")
+        if not source_path.exists():
+            return {"success": False, "status": "error", "message": "Move source does not exist."}
+        if dest_path.exists() or source_path == dest_path:
+            return {"success": False, "status": "already_exists",
+                    "message": "Move refused: destination exists or matches source; no files were overwritten."}
         shutil.move(str(source_path), str(dest_path))
+        if not dest_path.exists():
+            return {"success": False, "status": "verification_failed",
+                    "message": "Move returned without a file at the destination."}
         logger.info("Moved %s to %s", source_path, dest_path)
         return {"success": True, "status": "success", "message": f"Moved to {dest_path}", "output": str(dest_path)}
     except Exception as exc:  # noqa: BLE001
@@ -159,7 +176,18 @@ def copy_file(src: str, dest: str) -> Dict:
         dest_path = _safe_path(dest)
         if dest_path.is_dir():
             dest_path = dest_path / source_path.name
+        dest_path = dest_path.resolve()
+        if not _is_safe(dest_path):
+            raise UnsafePathError(f"Destination is outside allowed directories: {dest_path}")
+        if not source_path.is_file():
+            return {"success": False, "status": "error", "message": "Copy source is not an existing file."}
+        if dest_path.exists() or source_path == dest_path:
+            return {"success": False, "status": "already_exists",
+                    "message": "Copy refused: destination exists or matches source; no files were overwritten."}
         shutil.copy2(str(source_path), str(dest_path))
+        if not dest_path.is_file() or dest_path.stat().st_size != source_path.stat().st_size:
+            return {"success": False, "status": "verification_failed",
+                    "message": "Copy returned without a matching destination file size."}
         logger.info("Copied %s to %s", source_path, dest_path)
         return {"success": True, "status": "success", "message": f"Copied to {dest_path}", "output": str(dest_path)}
     except Exception as exc:  # noqa: BLE001
@@ -173,7 +201,15 @@ def rename_file(path: str, new_name: str) -> Dict:
         dest = source.with_name(new_name)
         if not _is_safe(dest):
             raise ValueError(f"Path not allowed: {dest}")
+        if not source.exists():
+            return {"success": False, "status": "error", "message": "Rename source does not exist."}
+        if dest.exists() or source == dest:
+            return {"success": False, "status": "already_exists",
+                    "message": "Rename refused: destination already exists; no files were overwritten."}
         source.rename(dest)
+        if not dest.exists():
+            return {"success": False, "status": "verification_failed",
+                    "message": "Rename returned but the destination was not found."}
         logger.info("Renamed %s to %s", source, dest)
         return {
             "success": True,
@@ -344,14 +380,18 @@ def open_app(target: str) -> Dict:
 
     logger.info("Opening %s via system executor", target_lower)
 
-    # Special Case: Chrome (launch via webbrowser, no shell)
+    # Request Chrome specifically. Opening the default browser can actually
+    # launch Edge while falsely claiming Chrome succeeded.
     if target_lower == "chrome":
         try:
             import webbrowser
-            webbrowser.open("about:blank")
-            return {"success": True, "status": "success", "message": "Chrome launched", "output": "Chrome launched"}
-        except Exception:
-            pass
+            if webbrowser.get("chrome").open("about:blank"):
+                return {"success": True, "status": "success",
+                        "message": "Chrome launch request accepted; window not independently verified.",
+                        "output": "Chrome launch request"}
+        except Exception as exc:
+            logger.debug("Chrome browser controller unavailable: %s", exc)
+        # Continue through the Start Menu scanner / OS fallback.
 
     # Special Case: Native Store Apps / URIs
     uri_map = {
@@ -367,7 +407,9 @@ def open_app(target: str) -> Dict:
         logger.info(f"Target found in URI map: {target_lower} -> {requested_uri}")
         try:
             _native_open(requested_uri)
-            return {"success": True, "status": "success", "message": f"{target_lower} launched (native)", "output": requested_uri}
+            return {"success": True, "status": "success",
+                    "message": f"OS accepted launch request for {target_lower}; window not verified.",
+                    "output": requested_uri}
         except Exception as e:
             logger.warning(f"URI launch failed for {requested_uri}, falling back to shortcut scan: {e}")
 
@@ -400,7 +442,9 @@ def open_app(target: str) -> Dict:
             app_path = app_paths[best_match]
             logger.info("Found App Match: %s -> %s", best_match, app_path)
             os.startfile(app_path)
-            return {"success": True, "status": "success", "message": f"{best_match} launched", "output": f"{best_match} launched"}
+            return {"success": True, "status": "success",
+                    "message": f"Start Menu launch requested for {best_match}; window not verified.",
+                    "output": app_path}
         
     except Exception as e:
         logger.error("Failed scanning installed apps: %s", e)
@@ -408,13 +452,17 @@ def open_app(target: str) -> Dict:
     # Generic fallback: hand target to the OS default handler (no shell).
     try:
         _native_open(target_lower)
-        return {"success": True, "status": "success", "message": f"Launched {target_lower}", "output": target_lower}
+        return {"success": True, "status": "success",
+                "message": f"OS launch requested for {target_lower}; window not verified.",
+                "output": target_lower}
     except Exception as exc:
         # Last ditch: try as a URI if not already tried
         if target_lower not in uri_map:
             try:
                 _native_open(f"{target_lower}:")
-                return {"success": True, "status": "success", "message": f"Launched {target_lower} as URI", "output": f"{target_lower}:"}
+                return {"success": True, "status": "success",
+                        "message": f"URI launch requested for {target_lower}; window not verified.",
+                        "output": f"{target_lower}:"}
             except Exception:
                 pass
         return {"success": False, "status": "error", "message": str(exc)}
@@ -447,12 +495,23 @@ def power_state(action: str) -> Dict:
         return {"success": False, "status": "unsupported", "message": "Power control is only supported on Windows."}
     try:
         if action_key == "lock":
-            ctypes.windll.user32.LockWorkStation()
-            return {"success": True, "status": "success", "message": "Workstation locked"}
+            locked = bool(ctypes.windll.user32.LockWorkStation())
+            if not locked:
+                return {"success": False, "status": "error",
+                        "message": "Windows rejected the workstation lock request."}
+            return {"success": True, "status": "success",
+                    "message": "Windows accepted the lock request; screen state not verified."}
         elif action_key == "sleep":
             # Argument list (no shell) => no command injection.
-            subprocess.run(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"])
-            return {"success": True, "status": "success", "message": "Putting computer to sleep"}
+            response = subprocess.run(
+                ["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if response.returncode != 0:
+                return {"success": False, "status": "error",
+                        "message": "Windows did not accept the sleep request."}
+            return {"success": True, "status": "success",
+                    "message": "Windows accepted a sleep request; actual sleep state not verified."}
         return {"success": False, "status": "error", "message": f"Unknown power action: {action}"}
     except Exception as exc:
         return {"success": False, "status": "error", "message": str(exc)}

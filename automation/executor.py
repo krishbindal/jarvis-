@@ -17,6 +17,7 @@ from executor import agent_tools
 from executor.download_executor import download_file, download_video
 from utils.logger import get_logger
 from core.action_registry import execute_action
+from core.execution_evidence import normalize_executor_result, summarize_execution_results
 from core.action_policy import check_action
 
 logger = get_logger(__name__)
@@ -112,7 +113,7 @@ def execute_automation_plan(
     Execute an automation plan step-by-step with feedback and context tracking.
     """
     step_results: List[Dict[str, Any]] = []
-    all_success = True
+
 
     _safe_emit(events, "command_progress", {"stage": "plan", "text": plan.goal or "automation"})
 
@@ -120,18 +121,18 @@ def execute_automation_plan(
         _safe_emit(events, "command_progress", {"stage": f"step_{idx}", "text": f"{step.action}: {step.target}"})
         _announce(interactions, step.action, step.target)
 
-        result = _execute_step(step, context_state)
+        result = normalize_executor_result(_execute_step(step, context_state), step.action)
         step_result = {
             "action": step.action,
             "target": result.get("resolved_target", step.target),
             "status": result.get("status"),
             "message": result.get("message"),
             "output": result.get("output"),
-            "success": result.get("success", True),
+            "success": result["success"],
         }
 
         step_results.append(step_result)
-        if context_state:
+        if context_state and result["success"]:
             context_state.update_after_action(
                 step.action,
                 result.get("resolved_target", step.target),
@@ -139,14 +140,15 @@ def execute_automation_plan(
                 result,
             )
 
-        if not result.get("success", True):
-            all_success = False
+        if not result["success"]:
             break
 
-    message = plan.message or (step_results[-1]["message"] if step_results else "Done.")
+    observed = summarize_execution_results(step_results, expected=len(plan.steps))
     return {
-        "success": all_success,
-        "status": "success" if all_success else "partial",
-        "message": message,
+        "success": observed["success"],
+        "status": observed["status"],
+        "message": observed["message"],
+        "reported_successes": observed["reported_successes"],
+        "attempted_steps": observed["attempted_steps"],
         "steps": step_results,
     }

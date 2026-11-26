@@ -22,6 +22,8 @@ from executor.system_executor import _native_open
 
 from core.mcp_hub import get_mcp_hub
 from core.action_policy import check_action
+from core.execution_evidence import normalize_executor_result
+from core.target_safety import inspect_open_target
 
 from executor.conversion_executor import convert_to_mp3, convert_to_pdf
 from executor.download_executor import download_file, download_video
@@ -110,6 +112,13 @@ def _open_dynamic_handler(target: str, extra: Optional[Dict] = None) -> Dict[str
     extra = extra or {}
     app = extra.get("app", "")
     resolved_type = extra.get("resolved_type", "url")
+    valid, needs_confirmation, explanation = inspect_open_target(target, resolved_type)
+    if not valid:
+        return {"success": False, "status": "unsafe_target", "message": explanation}
+    if needs_confirmation:
+        denied = check_action("open_executable", target)
+        if denied is not None:
+            return denied
 
     attempts = []
 
@@ -119,16 +128,20 @@ def _open_dynamic_handler(target: str, extra: Optional[Dict] = None) -> Dict[str
             logger.info("[EXEC] Attempt 1: Opening %s '%s' in '%s'", resolved_type, target, app)
             if app in ("chrome", "msedge", "firefox", "brave", "opera"):
                 try:
-                    webbrowser.get(app).open(target)
+                    opened = webbrowser.get(app).open(target)
                 except Exception:
-                    webbrowser.open(target)
+                    opened = False
+                if not opened:
+                    opened = webbrowser.open(target)
+                if not opened:
+                    raise RuntimeError("The browser did not accept the URL")
             elif app in ("code",):
                 subprocess.Popen(["code", target])
             else:
                 _native_open(target)
 
             return {"success": True, "status": "success",
-                    "message": f"Opening {target} in {app}", "output": target}
+                    "message": f"Launch requested for {target} in {app}; external state not verified.", "output": target}
         except Exception as exc:
             attempts.append(f"App launch failed ({app}): {exc}")
             logger.warning("[EXEC] Attempt 1 failed: %s", exc)
@@ -138,14 +151,14 @@ def _open_dynamic_handler(target: str, extra: Optional[Dict] = None) -> Dict[str
         logger.info("[EXEC] Attempt 2: Opening '%s' with system default", target)
         _native_open(target)
         return {"success": True, "status": "success",
-                "message": f"Opening {target}", "output": target}
+                "message": f"Launch request sent for {target}; external state not verified.", "output": target}
     except Exception as exc:
         attempts.append(f"System open failed: {exc}")
         logger.error("[EXEC] All attempts failed for '%s': %s", target, attempts)
 
     return {
         "success": False, "status": "error",
-        "message": f"Failed to open {target} after 3 attempts",
+        "message": f"Launch failed; {len(attempts)} available handler(s) failed.",
         "output": "; ".join(attempts),
     }
 
@@ -174,13 +187,14 @@ def _open_folder_handler(target: str) -> Dict[str, Any]:
 def _safe_exec(func, *args, **kwargs) -> Dict[str, Any]:
     """Wrap any executor function in try/except with structured error info."""
     try:
-        return func(*args, **kwargs)
+        value = func(*args, **kwargs)
+        return normalize_executor_result(value, getattr(func, "__name__", "action"))
     except Exception as exc:
-        logger.error("[EXEC] Action failed: %s\n%s", exc, traceback.format_exc())
+        logger.error("[EXEC] Action raised an exception: %s", exc, exc_info=True)
         return {
-            "success": False, "status": "error",
-            "message": f"Execution failed: {exc}",
-            "output": traceback.format_exc(),
+            "success": False,
+            "status": "error",
+            "message": "The action failed. Check the local diagnostic logs.",
         }
 
 
@@ -252,7 +266,11 @@ def execute_action(
                 break
 
     # Do not log complete Python scripts (they may contain credentials).
-    display_target = f"<{len(target)} chars of code>" if action == "execute_python" else str(target)[:160]
+    from config import LOG_COMMAND_TEXT
+    if action == "execute_python" or not LOG_COMMAND_TEXT:
+        display_target = f"<{len(str(target))} characters; private>"
+    else:
+        display_target = str(target)[:160]
     logger.info("[EXEC] action=%s target=%r", action, display_target)
 
     # Approval is controlled by the local Qt dialog, never by model-provided extra.

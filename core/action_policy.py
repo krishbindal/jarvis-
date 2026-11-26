@@ -22,6 +22,7 @@ CONFIRM_ACTIONS = frozenset({
     "delete_file", "move_file", "copy_file", "rename_file", "create_folder",
     "download_file", "download_video", "convert_to_mp3", "convert_to_pdf",
     "trigger_n8n", "power_state", "kill_process", "execute_python",
+    "open_executable",
     "click_element", "capture_screen", "automation:click", "automation:type", "automation:press_key",
     "automation:download",
 })
