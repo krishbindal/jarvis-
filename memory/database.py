@@ -11,7 +11,7 @@ class MemoryDB:
 
     def __init__(self, db_path="memory/jarvis.db"):
         self.db_path = db_path
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
         self._init_db()
         self.prune()  # Cleanup on every startup
 
@@ -150,6 +150,15 @@ class MemoryDB:
                 (datetime.now().isoformat(), role, content, str(context) if context else None, embedding)
             )
             conn.commit()
+            return cursor.lastrowid
+
+    def update_interaction_embedding(self, interaction_id: int, embedding: bytes) -> None:
+        """Attach an embedding to an existing interaction without duplicating text."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "UPDATE interactions SET embedding = ? WHERE id = ?",
+                (embedding, interaction_id),
+            )
 
     def get_recent_history(self, limit=10):
         """Fetch the last N interactions as dicts."""
