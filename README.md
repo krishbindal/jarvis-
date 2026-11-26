@@ -150,3 +150,11 @@ The Instagram skill synchronously requests an app or browser launch and reports 
 ### Honest routing-only diagnostic statistics
 
 `python stress_test_driver.py` now writes `artifacts/routing_check.json`, which reports **only command-parser recognition and measured parsing time**. It does not execute system actions or verify task completion. The old checked-in `assets/logs/stress_test_report.json` was removed because it labeled simulated routes as `PASSED`, which could be mistaken for real end-to-end test evidence. For actual automated execution tests, inspect GitHub Actions results and their commit SHAs; for microphone, browser and app-control validation, run the Windows acceptance checklist.
+
+### Current readiness reports (no fabricated "READY" statuses)
+
+Run `python -m diagnostics.final_report` or `python -m diagnostics.jarvis_master_check`. Both generate `artifacts/readiness/readiness-evidence.json` and `artifacts/readiness/READINESS_REPORT.md` with the current timestamp, Git commit when available, platform and **the precise scope of every check**.
+
+These diagnostics never claim "fully operational" or production readiness. A configured cloud API key does **not** establish that a provider responds; a Vosk directory does **not** establish working speech recognition, and a Python import path does not establish working hardware. Local Ollama HTTP probing is optional with `--probe-ollama`. The report reads the **process environment**, not `.env` credentials, and prints neither keys nor private messages. Inspect the report before sharing it; commit and host identifiers may still identify your environment.
+
+The old `diagnostics/reports/setup_report.json` was removed because its machine-specific readiness labels were stale. The legacy `diagnostics/jarvis_performance_suite.py` now exits nonzero and explains where actual headless CI measurements live; it no longer presents outdated synthetic checks as a modern end-to-end benchmark. See `docs/RELEASE_READINESS.md` for hardware acceptance criteria.

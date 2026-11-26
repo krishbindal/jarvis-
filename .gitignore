@@ -45,3 +45,8 @@ scratch/
 data/contacts.json
 .jarvis_fix_backup/
 data/generated_skills_pending/
+
+# Generated diagnostics and measured local evidence (not project source)
+artifacts/
+READINESS_REPORT.md
+diagnostics/reports/*.json
