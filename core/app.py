@@ -565,47 +565,65 @@ class JarvisApp:
     # --─ AI Fallback (Phase 12) ------------------------------
 
     def _handle_unknown(self, text: str, result: dict) -> tuple:
-        """Send unrecognized commands to AI for interpretation."""
-        logger.info("[AI-FALLBACK] Sending to AI: '%s'", text)
+        """Interpret unknown input without treating AI narration as task evidence."""
+        from core.execution_evidence import summarize_execution_results
         interaction_steps = []
         try:
             history_entries = get_recent_history()
             relevant_entries = get_relevant_context(text)
             ai_result = interpret_command(text, history=history_entries, relevant=relevant_entries)
             steps = ai_result.get("steps") or []
+            if not steps:
+                return {
+                    "action": "unknown",
+                    "success": False,
+                    "status": "not_executed",
+                    "message": "I couldn't identify a supported action. No tool ran; please clarify the task.",
+                    "type": "ai",
+                }, []
 
-            ai_msg = ai_result.get("message")
+            validated = self._validate_ai_steps(steps)
+            if "error" in validated:
+                return {
+                    "action": "ai_error",
+                    "success": False,
+                    "status": "invalid_plan",
+                    "message": validated["error"],
+                    "type": "ai",
+                }, []
 
-            if steps:
-                validated = self._validate_ai_steps(steps)
-                if "error" in validated:
-                    result = {"action": "ai_error", "message": validated["error"], "type": "ai"}
-                    return result, []
-
-                step_results = []
-                previous = None
-                for step in validated["steps"]:
-                    exec_res = self._execute_step(step, previous_result=previous)
-                    step_results.append(exec_res)
-                    if not exec_res.get("success", True) and self.stop_on_error:
-                        break
-                    previous = exec_res
-
-                interaction_steps = [
-                    {"action": s.get("action", ""), "target": s.get("target", ""),
-                     "status": r.get("status"), "output": r.get("output"),
-                     "message": r.get("message")}
-                    for s, r in zip(validated["steps"], step_results)
-                ]
-
-                result = {"steps": step_results, "type": "ai", "message": ai_msg, "emotion": ai_result.get("emotion", "normal")}
-            else:
-                result = {"action": "unknown", "target": "", "message": ai_msg or "I'm not sure how to handle that.", "type": "ai", "emotion": ai_result.get("emotion", "normal")}
+            step_results = []
+            for step in validated["steps"]:
+                execution = self._execute_step(step, previous_result=step_results[-1] if step_results else None)
+                step_results.append(execution)
+                if execution.get("success") is not True:
+                    break
+            interaction_steps = [
+                {
+                    "action": step.get("action", ""),
+                    "target": step.get("target", ""),
+                    "status": execution.get("status"),
+                    "message": execution.get("message"),
+                    "success": execution.get("success") is True,
+                }
+                for step, execution in zip(validated["steps"], step_results)
+            ]
+            summary = summarize_execution_results(step_results, expected=len(validated["steps"]))
+            return {
+                **summary,
+                "type": "ai",
+                "steps": step_results,
+                # The AI's proposed confirmation is deliberately not emitted.
+            }, interaction_steps
         except Exception as exc:
-            logger.error("[AI-FALLBACK] AI interpretation failed: %s", exc)
-            result = {"action": "error", "message": f"Sir, my AI systems encountered an error: {exc}", "type": "error"}
-
-        return result, interaction_steps
+            logger.error("[AI-FALLBACK] Interpretation failed: %s", exc, exc_info=True)
+            return {
+                "action": "error",
+                "success": False,
+                "status": "error",
+                "message": "The AI interpretation failed; no completion was confirmed.",
+                "type": "error",
+            }, interaction_steps
 
     # --─ Step Execution --------------------------------------
 
@@ -620,33 +638,17 @@ class JarvisApp:
         return result
 
     def _validate_ai_steps(self, steps: list[dict]) -> dict:
-        if not isinstance(steps, list):
-            return {"error": "Invalid steps format"}
-        deduped = []
-        seen = set()
-        for step in steps:
-            if not isinstance(step, dict):
-                continue
-            action = (step.get("action") or "").strip()
-            target = step.get("target") or ""
-            extra = step.get("extra") or {}
-            
-            if not action:
-                return {"error": "Step missing action"}
-            
-            # Phase 26: Support skill prefix and check against registry
-            if not action.startswith("skill:") and action not in ACTION_REGISTRY and action != "open_dynamic":
-                return {"error": f"Unsupported action: {action}"}
-            key = (action, target, json.dumps(extra, sort_keys=True, default=str))
-            
-            # Audio & Voice setup
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append({"action": action, "target": target, "extra": extra})
-        if not deduped:
-            return {"error": "No valid steps"}
-        return {"steps": deduped}
+        """Allow only registered, structured actions; reject model-made permissions."""
+        from core.plan_guard import validate_ai_action_plan
+        from skills import list_skills
+
+        skill_names = {item["name"] for item in list_skills()}
+        return validate_ai_action_plan(
+            steps,
+            registered_actions=ACTION_REGISTRY,
+            loaded_skills=skill_names,
+            allow_model_code=config.ALLOW_MODEL_CODE_EXECUTION,
+        )
 
     # --─ Agent Loop (Context-Aware) --------------------------
 
