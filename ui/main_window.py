@@ -46,7 +46,8 @@ class JarvisWindow(QMainWindow):
         super().__init__()
         self._events = event_bus
         self.setWindowTitle("JARVIS-X")
-        self.setMinimumSize(1000, 700)
+        self.setMinimumSize(980, 700)
+        self.resize(1180, 800)
         
         # Frameless and Transparent
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
@@ -99,68 +100,214 @@ class JarvisWindow(QMainWindow):
                 self.setStyleSheet(f.read())
 
     def _build_layout(self) -> None:
+        """Build a readable dashboard, without inventing connection/readiness data."""
+        import config
+
         self.central = QWidget()
         self.central.setObjectName("CentralWidget")
         self.setCentralWidget(self.central)
-        
+
         layout = QVBoxLayout(self.central)
-        layout.setSpacing(15)
-        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(14)
+        layout.setContentsMargins(26, 22, 26, 22)
 
-        # Custom Title Bar / Header
+        # Header / drag area, with real window controls.
         header = QHBoxLayout()
-        self.title_label = QLabel("JARVIS-X // COPILOT")
+        brand = QVBoxLayout()
+        brand.setSpacing(2)
+        self.title_label = QLabel("J A R V I S   /   X")
         self.title_label.setObjectName("Title")
-        
-        close_btn = QPushButton("✕")
-        close_btn.setFixedSize(30, 30)
-        close_btn.setStyleSheet("background: transparent; border: none; font-size: 18px; color: #ff5555;")
-        close_btn.clicked.connect(self.close)
-        
-        header.addWidget(self.title_label)
+        brand.addWidget(self.title_label)
+        subtitle = QLabel("YOUR DESKTOP COPILOT   •   ACTIONS WITH ACCOUNTABILITY")
+        subtitle.setObjectName("Subtitle")
+        brand.addWidget(subtitle)
+        header.addLayout(brand)
         header.addStretch()
+
+        header_hint = QLabel("LOCAL SESSION")
+        header_hint.setObjectName("HeaderHint")
+        header.addWidget(header_hint)
+
+        minimize = QPushButton("—")
+        minimize.setObjectName("WindowControl")
+        minimize.setToolTip("Minimize Jarvis")
+        minimize.setFixedSize(36, 34)
+        minimize.clicked.connect(self.showMinimized)
+        header.addWidget(minimize)
+
+        close_btn = QPushButton("×")
+        close_btn.setObjectName("WindowClose")
+        close_btn.setToolTip("Close Jarvis safely")
+        close_btn.setFixedSize(36, 34)
+        close_btn.clicked.connect(self.close)
         header.addWidget(close_btn)
+        layout.addLayout(header)
 
-        self.status_label = QLabel("SYSTEM READY")
+        # Primary surface: system HUD and factual privacy / execution state.
+        surface = QHBoxLayout()
+        surface.setSpacing(14)
+
+        hero = QFrame()
+        hero.setObjectName("HeroPanel")
+        hero_layout = QVBoxLayout(hero)
+        hero_layout.setContentsMargins(20, 18, 20, 12)
+        hero_layout.setSpacing(8)
+        eyebrow = QLabel("01  /  MISSION CONTROL")
+        eyebrow.setObjectName("Eyebrow")
+        hero_layout.addWidget(eyebrow)
+
+        self.status_label = QLabel("READY FOR COMMANDS")
         self.status_label.setObjectName("Status")
-        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setProperty("resultState", "ready")
+        hero_layout.addWidget(self.status_label)
 
-        # HUD Section
-        hud_container = QWidget()
-        hud_container.setFixedHeight(260)
-        hud_layout = QVBoxLayout(hud_container)
+        status_note = QLabel("Execution status comes from actual tool responses, not AI narration.")
+        status_note.setObjectName("Muted")
+        status_note.setWordWrap(True)
+        hero_layout.addWidget(status_note)
+
         self.hud = HUDWidget()
-        hud_layout.addWidget(self.hud)
+        self.hud.setMinimumHeight(170)
+        hero_layout.addWidget(self.hud, stretch=1)
+        surface.addWidget(hero, stretch=3)
 
-        # Input Section
-        self.command_input = QLineEdit()
-        self.command_input.setPlaceholderText("Direct system command input...")
-        self.command_input.returnPressed.connect(self._emit_command)
+        insights = QFrame()
+        insights.setObjectName("InfoPanel")
+        insights_layout = QVBoxLayout(insights)
+        insights_layout.setContentsMargins(20, 18, 20, 18)
+        insights_layout.setSpacing(11)
+        meta = QLabel("02  /  TRUST & CONTROL")
+        meta.setObjectName("Eyebrow")
+        insights_layout.addWidget(meta)
 
-        execute = QPushButton("ENGAGE")
-        execute.setCursor(Qt.PointingHandCursor)
-        execute.clicked.connect(self._emit_command)
+        privacy_header = QLabel("DATA SHARING")
+        privacy_header.setObjectName("InfoHeading")
+        insights_layout.addWidget(privacy_header)
+        privacy_items = (
+            ("Cloud voice", config.ALLOW_CLOUD_STT),
+            ("Cloud screen", config.ALLOW_CLOUD_VISION),
+            ("Cloud clipboard", config.ALLOW_CLOUD_CLIPBOARD),
+        )
+        self.privacy_label = QLabel(
+            "\\n".join(f"{name}: {'ON' if enabled else 'OFF'}" for name, enabled in privacy_items)
+        )
+        self.privacy_label.setObjectName("PrivacySummary")
+        self.privacy_label.setWordWrap(True)
+        insights_layout.addWidget(self.privacy_label)
+
+        state_heading = QLabel("LAST EXECUTION")
+        state_heading.setObjectName("InfoHeading")
+        insights_layout.addWidget(state_heading)
+        self.execution_label = QLabel("No actions executed in this session.")
+        self.execution_label.setWordWrap(True)
+        self.execution_label.setObjectName("ExecutionSummary")
+        insights_layout.addWidget(self.execution_label)
+
+        self.validation_label = QLabel(
+            "Sensitive actions require your approval. A tool report is not independent verification."
+        )
+        self.validation_label.setObjectName("Muted")
+        self.validation_label.setWordWrap(True)
+        insights_layout.addWidget(self.validation_label)
+        insights_layout.addStretch(1)
+        surface.addWidget(insights, stretch=2)
+        layout.addLayout(surface, stretch=5)
+
+        activity_heading = QHBoxLayout()
+        activity_title = QLabel("03  /  ACTIVITY TIMELINE")
+        activity_title.setObjectName("Eyebrow")
+        activity_heading.addWidget(activity_title)
+        activity_heading.addStretch()
+        activity_hint = QLabel("LATEST EVENTS  •  LOCAL DISPLAY")
+        activity_hint.setObjectName("Muted")
+        activity_heading.addWidget(activity_hint)
+        layout.addLayout(activity_heading)
+
+        self.console = QTextEdit()
+        self.console.setObjectName("ActivityConsole")
+        self.console.setReadOnly(True)
+        self.console.setPlaceholderText("Ready to record actual command and execution events…")
+        self.console.document().setMaximumBlockCount(500)
+        layout.addWidget(self.console, stretch=3)
+
+        composer = QFrame()
+        composer.setObjectName("CommandPanel")
+        composer_layout = QVBoxLayout(composer)
+        composer_layout.setContentsMargins(16, 12, 16, 13)
+        composer_layout.setSpacing(9)
+
+        composer_title = QLabel("SEND A COMMAND")
+        composer_title.setObjectName("Eyebrow")
+        composer_layout.addWidget(composer_title)
 
         input_row = QHBoxLayout()
-        input_row.setSpacing(12)
+        input_row.setSpacing(9)
+        self.command_input = QLineEdit()
+        self.command_input.setObjectName("CommandInput")
+        self.command_input.setPlaceholderText("Ask Jarvis to do a specific task…")
+        self.command_input.setAccessibleName("Jarvis command")
+        self.command_input.returnPressed.connect(self._emit_command)
         input_row.addWidget(self.command_input, stretch=1)
-        # Manual activation helps when wake-word model is unavailable.
+
         talk = QPushButton("TALK")
-        talk.setToolTip("Listen for one command (requires a Vosk model)")
+        talk.setObjectName("SecondaryAction")
+        talk.setToolTip("Listen for one command; requires a local Vosk model")
         talk.clicked.connect(lambda: self._events.emit("jarvis_wake", {"source": "app_internal"}))
         input_row.addWidget(talk)
+
+        execute = QPushButton("RUN TASK")
+        execute.setObjectName("PrimaryAction")
+        execute.setCursor(Qt.PointingHandCursor)
+        execute.clicked.connect(self._emit_command)
         input_row.addWidget(execute)
 
-        # Documentation / console
-        self.console = QTextEdit()
-        self.console.setReadOnly(True)
-        self.console.setPlaceholderText("Awaiting neural link...")
-        
-        layout.addLayout(header)
-        layout.addWidget(self.status_label)
-        layout.addWidget(hud_container)
-        layout.addLayout(input_row)
-        layout.addWidget(self.console, stretch=1)
+        stop_btn = QPushButton("STOP")
+        stop_btn.setObjectName("StopAction")
+        stop_btn.setToolTip("Request interruption and cancel pending approvals")
+        stop_btn.clicked.connect(self._request_stop)
+        input_row.addWidget(stop_btn)
+        composer_layout.addLayout(input_row)
+
+        suggestions = QHBoxLayout()
+        suggestions.setSpacing(8)
+        tip = QLabel("TRY")
+        tip.setObjectName("Muted")
+        suggestions.addWidget(tip)
+        for prompt in ("system check", "open notepad", "list files"):
+            button = QPushButton(prompt.title())
+            button.setObjectName("Suggestion")
+            button.setToolTip("Fill the command field; do not run automatically")
+            button.clicked.connect(
+                lambda checked=False, value=prompt: self._prefill_command(value)
+            )
+            suggestions.addWidget(button)
+        suggestions.addStretch()
+        composer_layout.addLayout(suggestions)
+        layout.addWidget(composer)
+
+        footer = QLabel(
+            "JARVIS-X  /  ACTIONS REQUIRE EVIDENCE   •   CLOUD SHARING IS OPT-IN"
+        )
+        footer.setObjectName("Footer")
+        footer.setAlignment(Qt.AlignCenter)
+        layout.addWidget(footer)
+
+    def _prefill_command(self, text: str) -> None:
+        """Suggestions fill the field; no action occurs without another click."""
+        self.command_input.setText(text)
+        self.command_input.setFocus()
+
+    def _request_stop(self) -> None:
+        """Request cancellation, without falsely promising that external actions stopped."""
+        from core.action_policy import get_action_approvals
+        get_action_approvals().cancel_all()
+        self._events.emit("interrupt_tts", {"source": "ui"})
+        self._events.emit("interrupt_autonomy", {"source": "ui"})
+        self.status_label.setText("INTERRUPT REQUESTED")
+        self.execution_label.setText(
+            "Cancellation requested. External actions already running may still finish."
+        )
+        self._append_log("SYSTEM > Stop requested; pending approvals cancelled.")
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
