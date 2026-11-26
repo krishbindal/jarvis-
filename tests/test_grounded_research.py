@@ -40,7 +40,7 @@ class WikipediaSourceTests(unittest.TestCase):
             result = research_skill.execute("Artificial intelligence")
         self.assertFalse(result["success"])
         self.assertEqual(result["status"], "no_verified_sources")
-        self.assertNotIn("completed", result["message"].lower())
+        self.assertIn("cannot claim", result["message"].lower())
 
     def test_invalid_topic_does_not_contact_source(self):
         with patch.object(researcher.requests, "get") as get:
