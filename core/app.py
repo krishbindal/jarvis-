@@ -495,72 +495,52 @@ class JarvisApp:
     # --─ Multi-Step Execution (Phase 5) ----------------------
 
     def _execute_multi_step(self, steps: List[dict], text: str, payload: dict) -> tuple[dict, List[dict]]:
-        """Execute a list of routed command steps sequentially (Phase 5)."""
-        logger.info("[MULTI-STEP] Executing %d steps for text='%s'", len(steps), text)
-        all_interaction_steps = []
+        """Report actual tool outcomes, never the proposed planner confirmation."""
+        from core.execution_evidence import summarize_execution_results
+
+        interaction_steps: List[dict] = []
+        reported = []
         previous = None
-        final_result = {"type": "multi_step", "steps": []}
-
-        for i, step_result in enumerate(steps):
-            action = step_result.get("action", "")
-            target = step_result.get("target", "")
-            extra = step_result.get("extra", {})
-
-            # -- [PARSED] Step --------------------------------
-            logger.info("[PARSED] Step %d/%d: action=%s target='%s'", i + 1, len(steps), action, target)
-            try:
-                self._events.emit("command_progress", {"stage": f"step_{i+1}", "text": f"{action}: {target}"})
-            except Exception:
-                pass
-
+        for index, planned in enumerate(steps):
+            action = planned.get("action", "") if isinstance(planned, dict) else ""
+            target = planned.get("target", "") if isinstance(planned, dict) else ""
+            extra = planned.get("extra", {}) if isinstance(planned, dict) else {}
+            self._events.emit("command_progress", {
+                "stage": f"step_{index + 1}",
+                "text": f"Step {index + 1}/{len(steps)}: {action}",
+            })
             if action == "unknown":
-                step_result, ai_steps = self._handle_unknown(text, step_result)
-                all_interaction_steps.extend(ai_steps)
-            elif action == "chat":
-                logger.info("[ACTION] Step %d: chat", i + 1)
-                exec_result = execute_action(action, target)
-                step_result["exec_result"] = exec_result
-                self._context.update_after_action(action, target, extra, exec_result)
-                logger.info("[EXECUTION] Step %d: chat completed", i + 1)
-            elif action not in ("noop",):
-                # -- [ACTION] Execute Step --------------------
-                logger.info("[ACTION] Step %d: %s target='%s'", i + 1, action, target)
-                exec_result = execute_action(action, target, extra, previous_result=previous)
-                step_result["exec_result"] = exec_result
-                step_result["message"] = exec_result.get("message", step_result.get("message", ""))
-                self._context.update_after_action(action, target, extra, exec_result)
+                outcome, ai_steps = self._handle_unknown(text, planned)
+                interaction_steps.extend(ai_steps)
+            elif action == "noop":
+                outcome = {"success": False, "status": "not_executed", "message": "No action to execute."}
+            else:
+                outcome = execute_action(action, target, extra, previous_result=previous)
 
-                # Phase 24: Log usage for habits (multi-step)
-                if action in ["open_app", "open_url", "trigger_n8n"]:
-                    self._db.log_usage(action, target)
+            result_step = {
+                "action": action,
+                "target": target,
+                "success": outcome.get("success") is True,
+                "status": outcome.get("status", "unverified"),
+                "message": outcome.get("message", ""),
+                "output": outcome.get("output"),
+            }
+            reported.append(result_step)
+            interaction_steps.append({k: result_step[k] for k in ("action", "target", "success", "status", "message")})
+            if outcome.get("success") is not True:
+                logger.warning("[MULTI-STEP] Stopped at action %s: failed/unverified", action)
+                break
 
-                # -- [EXECUTION] Log Step --------------------─
-                logger.info("[EXECUTION] Step %d: status=%s message='%s'",
-                            i + 1, exec_result.get("status"), exec_result.get("message", ""))
+            self._context.update_after_action(action, target, extra, outcome)
+            if action in ("open_app", "open_url", "trigger_n8n"):
+                self._db.log_usage(action, target)
+            session.record(action, target, app=extra.get("app") if isinstance(extra, dict) else None)
+            previous = outcome
 
-                all_interaction_steps.append({
-                    "action": action, "target": target,
-                    "status": exec_result.get("status"),
-                    "output": exec_result.get("output"),
-                    "message": exec_result.get("message"),
-                })
-
-                session.record(action, target, app=extra.get("app"))
-
-                if not exec_result.get("success", True) and self.stop_on_error:
-                    logger.warning("[MULTI-STEP] Step %d failed, stopping chain", i + 1)
-                    break
-
-                previous = exec_result
-
-            final_result["steps"].append(step_result)
-
+        summary = summarize_execution_results(reported, expected=len(steps))
+        final_result = {**summary, "type": "multi_step", "steps": reported}
         self._events.emit("command_result", final_result)
-
-        last_msg = final_result["steps"][-1].get("message", "") if final_result["steps"] else ""
-        final_result["message"] = last_msg or "Sequence completed."
-
-        return final_result, all_interaction_steps
+        return final_result, interaction_steps
 
     # --─ AI Fallback (Phase 12) ------------------------------
 
