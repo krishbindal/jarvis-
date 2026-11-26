@@ -22,6 +22,7 @@ from executor.system_executor import _native_open
 
 from core.mcp_hub import get_mcp_hub
 from core.action_policy import check_action
+from core.execution_evidence import normalize_executor_result
 
 from executor.conversion_executor import convert_to_mp3, convert_to_pdf
 from executor.download_executor import download_file, download_video
@@ -174,13 +175,14 @@ def _open_folder_handler(target: str) -> Dict[str, Any]:
 def _safe_exec(func, *args, **kwargs) -> Dict[str, Any]:
     """Wrap any executor function in try/except with structured error info."""
     try:
-        return func(*args, **kwargs)
+        value = func(*args, **kwargs)
+        return normalize_executor_result(value, getattr(func, "__name__", "action"))
     except Exception as exc:
-        logger.error("[EXEC] Action failed: %s\n%s", exc, traceback.format_exc())
+        logger.error("[EXEC] Action raised an exception: %s", exc, exc_info=True)
         return {
-            "success": False, "status": "error",
-            "message": f"Execution failed: {exc}",
-            "output": traceback.format_exc(),
+            "success": False,
+            "status": "error",
+            "message": "The action failed. Check the local diagnostic logs.",
         }
 
 
