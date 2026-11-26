@@ -64,6 +64,7 @@ class FilesystemOutcomeTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as temp,
             patch.object(executor, "_safe_path", side_effect=lambda path: Path(path)),
+            patch.object(executor, "_is_safe", return_value=True),
             patch.object(executor.shutil, "copy2", return_value=None),
         ):
             source = Path(temp) / "source.txt"
