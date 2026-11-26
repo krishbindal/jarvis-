@@ -393,17 +393,12 @@ def _route_single(normalized: str) -> Dict:
         exe = _resolve_app(target)
         return _build("kill_process", exe, f"Closing {target}")
 
-    # -- 14. Fallback => NLU Reasoner (Phase 6/26) ----------
-    logger.info(f"[ROUTER] No direct pattern match for '{normalized}'. Using NLU Reasoner...")
-    try:
-        from skills.system_agent import _generate_code
-        # We repurpose the system_agent's logic to see if it can generate a script or if it's a creative request
-        # For the stress test, we'll route complex/fuzzy intents to system_agent
-        return _build("skill:system_agent", normalized, "Analyzing complex intent...")
-    except Exception:
-        pass
-
-    return _build("unknown", "", "Command not recognized.")
+    # -- 14. Unmatched commands are questions/plans, not implicit Python.
+    # Running generated code requires an explicit request and separate opt-ins.
+    logger.info("[ROUTER] No deterministic match; requesting a validated plan.")
+    if normalized.startswith(("run generated python to ", "execute generated python to ")):
+        return _build("skill:system_agent", normalized, "Model-generated Python execution requested.")
+    return _build("unknown", "", "No deterministic action matched.")
 
 
 # -------------------------------------------------
