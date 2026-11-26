@@ -139,4 +139,4 @@ The dashboard includes a mission-control HUD, a plain-text event timeline, a pri
 
 The Windows GitHub Actions job measures selected-module code coverage and performs a real headless PySide6 widget smoke test, saving `jarvis-dashboard-headless.png` when the offscreen platform supports it. This screenshot does not prove on-screen rendering or real Windows automation on your laptop.
 
-See [release-readiness checklist](docs/RELEASE_READINESS.md) for hardware, API-provider and desktop validation that CI cannot establish.
+See the [deep audit findings](docs/DEEP_AUDIT.md) and the [release-readiness checklist](docs/RELEASE_READINESS.md) for hardware, API-provider and desktop validation that CI cannot establish.
