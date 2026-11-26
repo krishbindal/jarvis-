@@ -65,12 +65,17 @@ class JarvisWindow(QMainWindow):
         self._build_layout()
         self._load_styles()
 
+        self._bus_handlers = []
         if self._events:
-            self._events.subscribe("command_result", self.signals.result_signal.emit)
-            self._events.subscribe("stream_output", self.signals.stream_signal.emit)
-            self._events.subscribe("cinematic_log", self.signals.cinematic_signal.emit)
-            self._events.subscribe("command_progress", self.signals.progress_signal.emit)
-            self._events.subscribe("action_approval_requested", self.signals.approval_signal.emit)
+            for event_name, callback in (
+                ("command_result", self.signals.result_signal.emit),
+                ("stream_output", self.signals.stream_signal.emit),
+                ("cinematic_log", self.signals.cinematic_signal.emit),
+                ("command_progress", self.signals.progress_signal.emit),
+                ("action_approval_requested", self.signals.approval_signal.emit),
+            ):
+                self._events.subscribe(event_name, callback)
+                self._bus_handlers.append((event_name, callback))
         self._drag_pos = QPoint()
         self._streaming = False
         self._typing_timer = QTimer(self)
@@ -351,6 +356,14 @@ class JarvisWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         from core.action_policy import get_action_approvals
         get_action_approvals().set_ui_ready(False)
+        # The EventBus outlives this widget; never retain a stale Qt Signal.emit.
+        if self._events:
+            for event_name, callback in self._bus_handlers:
+                self._events.unsubscribe(event_name, callback)
+        self._bus_handlers.clear()
+        self._typing_timer.stop()
+        self.hud._timer.stop()
+        self.hud._stats_timer.stop()
         super().closeEvent(event)
 
     def _emit_command(self) -> None:
