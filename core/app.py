@@ -379,7 +379,7 @@ class JarvisApp:
 
             # -- [PARSED] ------------------------------------─
             route_result = route_command(text)
-            logger.info("[PARSED] result=%s", _summary(route_result))
+            logger.info("[PARSED] route_kind=%s", type(route_result).__name__)
 
             # Informational questions use the AI answer path, never a desktop
             # agent that could click or type merely because the command is vague.
@@ -416,7 +416,7 @@ class JarvisApp:
             action = result.get("action", "")
 
             # -- [PARSED] single-step ------------------------─
-            logger.info("[PARSED] action=%s target='%s'", action, result.get("target", ""))
+            logger.info("[PARSED] action=%s target_chars=%d", action, len(str(result.get("target", ""))))
 
             # -- 1. Stop / Interruption (Phase 32) ------------
             if action == "stop":
@@ -469,7 +469,7 @@ class JarvisApp:
 
             if action not in ("noop",):
                 self._interactions.narrate_action(action, target)
-                logger.info("[ACTION] Executing: %s target='%s'", action, target)
+                logger.info("[ACTION] Executing: %s target_chars=%d", action, len(str(target)))
                 exec_result = execute_action(action, target, extra)
                 result["exec_result"] = exec_result
                 result["success"] = exec_result.get("success") is True
