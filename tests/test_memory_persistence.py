@@ -1,5 +1,6 @@
 """Interaction rows should be durable, ordered and bounded before embeddings."""
 import sqlite3
+from contextlib import closing
 import tempfile
 from pathlib import Path
 import unittest
@@ -20,7 +21,7 @@ class MemoryDurabilityTests(unittest.TestCase):
             self.assertEqual(len(history), 1)
             self.assertEqual(history[0]["user_input"], "please open notepad")
             self.assertEqual(history[0]["result"]["output"], "I could not open it.")
-            with sqlite3.connect(db.db_path) as conn:
+            with closing(sqlite3.connect(db.db_path)) as conn:
                 rows = conn.execute("SELECT role, content FROM interactions ORDER BY id").fetchall()
             self.assertEqual(rows, [
                 ("user", "please open notepad"),
@@ -32,7 +33,7 @@ class MemoryDurabilityTests(unittest.TestCase):
             db = MemoryDB(str(Path(folder) / "memory.sqlite"))
             id1 = db.add_interaction("user", "hello")
             db.update_interaction_embedding(id1, b"0123")
-            with sqlite3.connect(db.db_path) as conn:
+            with closing(sqlite3.connect(db.db_path)) as conn:
                 data = conn.execute("SELECT id, embedding FROM interactions").fetchall()
             self.assertEqual(data, [(id1, b"0123")])
 
