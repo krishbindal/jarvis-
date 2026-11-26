@@ -692,6 +692,22 @@ class JarvisApp:
             return True
         return False
 
+    @staticmethod
+    def _agent_report(executed_steps: list[dict], reason: str = "") -> dict:
+        """Use real tool results, not an LLM's proposed end-of-task narrative."""
+        from core.execution_evidence import summarize_execution_results
+        observed = summarize_execution_results(
+            [step.get("result") for step in executed_steps],
+            expected=len(executed_steps),
+        )
+        if reason.startswith(("Stopping", "A tool", "Reached", "time limit")) and observed["success"]:
+            observed.update({
+                "success": False,
+                "status": "incomplete",
+                "message": observed["message"] + " The full task was not confirmed.",
+            })
+        return {**observed, "type": "agent_loop", "steps": executed_steps}
+
     def _run_agent_loop(self, command: str) -> tuple[dict, list]:
         """Plan => act => observe loop using the tool abstraction layer.
         
@@ -718,9 +734,9 @@ class JarvisApp:
                 # Global timeout guard
                 if time.monotonic() - loop_start > LOOP_TIMEOUT:
                     final_message = planner_msg or "Stopping: time limit reached."
-                    result_payload = {"type": "agent_loop", "steps": executed_steps, "message": final_message}
+                    result_payload = self._agent_report(executed_steps, final_message)
                     self._events.emit("command_result", result_payload)
-                    self._interactions.finish(final_message)
+                    self._interactions.finish(result_payload["message"])
                     return result_payload, executed_steps
 
                 if not pending_steps:
@@ -730,9 +746,9 @@ class JarvisApp:
                     pending_steps = steps or []
                     if not pending_steps:
                         final_message = planner_msg or feedback or "Task complete."
-                        result_payload = {"type": "agent_loop", "steps": executed_steps, "message": final_message}
+                        result_payload = self._agent_report(executed_steps, final_message)
                         self._events.emit("command_result", result_payload)
-                        self._interactions.finish(final_message)
+                        self._interactions.finish(result_payload["message"])
                         return result_payload, executed_steps
 
                 step = pending_steps.pop(0)
@@ -747,9 +763,9 @@ class JarvisApp:
                 step_key = (tool, input_arg)
                 if step_key in seen_steps:
                     final_message = planner_msg or f"Stopping: repeated action {tool}."
-                    result_payload = {"type": "agent_loop", "steps": executed_steps, "message": final_message}
+                    result_payload = self._agent_report(executed_steps, final_message)
                     self._events.emit("command_result", result_payload)
-                    self._interactions.finish(final_message)
+                    self._interactions.finish(result_payload["message"])
                     return result_payload, executed_steps
                 seen_steps.add(step_key)
 
@@ -765,29 +781,36 @@ class JarvisApp:
 
                 pending_steps.clear()
 
-                if not self._has_progress(before_ctx, after_ctx, result):
-                    final_message = planner_msg or "Stopping: no progress detected."
-                    result_payload = {"type": "agent_loop", "steps": executed_steps, "message": final_message}
+                # A failed or missing tool status is not a reason to replan as if
+                # progress happened. Stop with the observed failure instead.
+                if result.get("success") is not True:
+                    result_payload = self._agent_report(executed_steps, "A tool did not report success.")
                     self._events.emit("command_result", result_payload)
-                    self._interactions.finish(final_message)
+                    self._interactions.finish(result_payload["message"])
                     return result_payload, executed_steps
 
-                if not result.get("success", True):
-                    feedback = f"Step {tool} failed: {status_line or 'no message'}. Continue from current app/url."
-                    continue
+                if not self._has_progress(before_ctx, after_ctx, result):
+                    final_message = planner_msg or "Stopping: no progress detected."
+                    result_payload = self._agent_report(executed_steps, final_message)
+                    self._events.emit("command_result", result_payload)
+                    self._interactions.finish(result_payload["message"])
+                    return result_payload, executed_steps
 
             final_message = planner_msg or (executed_steps[-1]["result"].get("message", "") if executed_steps else "Reached agent limit.")
             if executed_steps and executed_steps[-1]["result"].get("success") is False:
                 final_message = f"{final_message} Need guidance for the next move."
             if len(executed_steps) >= max_steps and not planner_msg:
                 final_message = f"{final_message} (stopped after {max_steps} steps)"
-            result_payload = {"type": "agent_loop", "steps": executed_steps, "message": final_message}
+            result_payload = self._agent_report(executed_steps, final_message)
             self._events.emit("command_result", result_payload)
-            self._interactions.finish(final_message)
+            self._interactions.finish(result_payload["message"])
             return result_payload, executed_steps
         except Exception as exc:
             logger.error("[AGENT] Agent loop failed: %s", exc, exc_info=True)
-            result_payload = {"type": "agent_loop", "message": f"Agent loop error: {exc}"}
+            result_payload = {
+                "type": "agent_loop", "success": False, "status": "error",
+                "message": "The agent loop failed; task completion was not confirmed.",
+            }
             self._events.emit("command_result", result_payload)
             self._interactions.finish(result_payload["message"])
             return result_payload, []
