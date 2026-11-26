@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import threading
 import time
+from copy import deepcopy
 from collections import OrderedDict
 from typing import Any, Dict, Optional
 
@@ -41,18 +42,19 @@ class CommandCache:
             # Move to end (most recently used)
             self._cache.move_to_end(key)
             self._hits += 1
-            return entry.value
+            # Callers may annotate targets/extra; never expose the cached object.
+            return deepcopy(entry.value)
 
     def put(self, key: str, value: Dict[str, Any]) -> None:
         """Store a parse result."""
         with self._lock:
             if key in self._cache:
                 self._cache.move_to_end(key)
-                self._cache[key] = _CacheEntry(value)
+                self._cache[key] = _CacheEntry(deepcopy(value))
             else:
                 if len(self._cache) >= self._max_size:
                     self._cache.popitem(last=False)
-                self._cache[key] = _CacheEntry(value)
+                self._cache[key] = _CacheEntry(deepcopy(value))
 
     def invalidate(self, key: str) -> None:
         """Remove a specific key."""
