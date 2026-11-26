@@ -17,6 +17,7 @@ line or third-party integration was tested.**
 | Concurrency | `core/app.py` | A new daemon thread was created for every command, racing over shared task state | One active command; extra requests get an explicit busy response |
 | Unknown commands | `core/command_router.py` | Generic unknown commands were routed to generated Python | Use an explicit safe fallback instead of automatic code generation |
 | URL/file opening | `core/action_registry.py`, `core/target_safety.py` | Unsafe URI schemes, executable local targets, ignored browser refusal, incorrect “3 attempts” failure message | Reject executable URI schemes; require executable-file approval; check browser response; report actual handler failures |
+| Native/file postconditions | `executor/system_executor.py` | Some system calls returned success without checking the result (including Chrome via the default browser and sleep/lock request failure) | Check folder/file postconditions and Windows API/subprocess return signals; report launch requests as requests, not independently verified window state |
 | Qt dashboard | `ui/main_window.py`, `ui/styles.qss` | Limited state visibility and rich text interpretation of user/tool strings | Readable mission-control layout, permission status, literal text insertion, bounded timeline, explicit result state |
 | QA | `tests/`, `scripts/ci_headless_benchmark.py` | No direct regression tests for many failure/unverified cases | Tests for malformed tool outputs, unsupported actions, forged approvals, concurrency, unsafe open targets; headless Qt widget checks |
 
