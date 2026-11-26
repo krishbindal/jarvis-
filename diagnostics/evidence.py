@@ -127,7 +127,7 @@ def collect_evidence(
             "status": "not_tested",
             "detail": (
                 "Key configured; validity, quota and actual API response NOT checked."
-                if configured else "No key configured; live provider not checked."
+                if configured else "No key present in process environment; .env file not inspected; live provider not checked."
             ),
         })
 
@@ -189,7 +189,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "# JARVIS-X: evidence-based readiness report",
         "",
         f"**Generated (UTC):** {report['generated_utc']}",
-        f"**Git commit:** \\{report.get('commit') or 'unknown'}",
+        f"**Git commit:** {report.get('commit') or 'unknown'}",
         f"**Host:** {report['platform']} · Python {report['python']}",
         "",
         "**Release status: NOT VERIFIED** — this report cannot certify full functionality.",
@@ -198,7 +198,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "| --- | --- | --- |",
     ]
     for check in report["checks"]:
-        detail = check["detail"].replace("|", "/").replace("\\n", " ")
+        detail = check["detail"].replace("|", "/").replace("\n", " ")
         lines.append(f"| {check['name']} | {check['status']} | {detail} |")
     lines.extend([
         "",
@@ -207,7 +207,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "Complete docs/RELEASE_READINESS.md and preserve actual test logs before assigning a release rating.",
         "",
     ])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def write_report(report: dict[str, Any], destination: Path) -> tuple[Path, Path]:
