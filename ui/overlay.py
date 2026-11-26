@@ -74,6 +74,14 @@ class JarvisOverlay(QWidget):
         self._timer.timeout.connect(self._tick)
         self._timer.start(40) # 25 FPS – Better for low-end PCs
 
+        # Timers belong to this widget, so they cannot fire after Qt deletes it.
+        self._status_reset_timer = QTimer(self)
+        self._status_reset_timer.setSingleShot(True)
+        self._status_reset_timer.timeout.connect(self._reset_to_idle)
+        self._proactive_timer = QTimer(self)
+        self._proactive_timer.setSingleShot(True)
+        self._proactive_timer.timeout.connect(self._clear_proactive_notification)
+
         # Signals Bridge (more robust for experimental PySide6/Python environments)
         self.signals = OverlaySignals()
         self.signals.state_signal.connect(self._on_state_change)
@@ -81,11 +89,30 @@ class JarvisOverlay(QWidget):
         self.signals.notification_signal.connect(self._on_proactive_notification)
         self.signals.progress_signal.connect(self._on_command_progress)
 
+        self._bus_handlers = []
         if self._events:
-            self._events.subscribe("overlay_state", self.signals.state_signal.emit)
-            self._events.subscribe("command_result", self.signals.result_signal.emit)
-            self._events.subscribe("proactive_notification", self.signals.notification_signal.emit)
-            self._events.subscribe("command_progress", self.signals.progress_signal.emit)
+            for event_name, callback in (
+                ("overlay_state", self.signals.state_signal.emit),
+                ("command_result", self.signals.result_signal.emit),
+                ("proactive_notification", self.signals.notification_signal.emit),
+                ("command_progress", self.signals.progress_signal.emit),
+            ):
+                self._events.subscribe(event_name, callback)
+                self._bus_handlers.append((event_name, callback))
+
+    def closeEvent(self, event) -> None:
+        """Release subscriptions and QTimers before the widget is destroyed."""
+        self._timer.stop()
+        self._status_reset_timer.stop()
+        self._proactive_timer.stop()
+        if self._events:
+            for event_name, callback in self._bus_handlers:
+                self._events.unsubscribe(event_name, callback)
+        self._bus_handlers.clear()
+        super().closeEvent(event)
+
+    def _reset_to_idle(self) -> None:
+        self.set_state(OverlayState.IDLE)
 
     def _position_at_top(self) -> None:
         screen = QApplication.primaryScreen()
@@ -121,7 +148,7 @@ class JarvisOverlay(QWidget):
         msg = payload.get("message", "")
         if msg:
             self.set_state(OverlayState.SPEAKING, msg[:40])
-            QTimer.singleShot(3000, lambda: self.set_state(OverlayState.IDLE))
+            self._status_reset_timer.start(3000)
         else:
             self.set_state(OverlayState.IDLE)
 
@@ -253,7 +280,7 @@ class JarvisOverlay(QWidget):
         self.set_state(OverlayState.OBSERVING)
         
         # Clear after 8 seconds
-        QTimer.singleShot(8000, self._clear_proactive_notification)
+        self._proactive_timer.start(8000)
 
     def _clear_proactive_notification(self) -> None:
         self._proactive_text = ""
