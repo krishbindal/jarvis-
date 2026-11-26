@@ -35,36 +35,81 @@ def cosine_similarity(v1, v2):
     v1, v2 = np.array(v1), np.array(v2)
     return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
 
-def _fetch_embedding_in_bg(role: str, content: str, context: Dict):
-    """Fetch embedding and store asynchronously."""
+# Never create an unlimited number of background requests or threads.
+_MAX_EMBEDDING_WORKERS = 8
+_EMBEDDING_SLOTS = threading.BoundedSemaphore(_MAX_EMBEDDING_WORKERS)
+
+
+def _fetch_embedding_in_bg(interaction_id: int, content: str) -> None:
+    """Update an already persisted row; never duplicate or lose the transcript."""
     try:
         vec = get_embedding(content)
-        blob = struct.pack(f'{len(vec)}f', *vec) if vec else None
+        if not vec or len(vec) > 8192:
+            return
+        blob = struct.pack(f"{len(vec)}f", *vec)
         with _LOCK:
-            _DB.add_interaction(role, content, context=context, embedding=blob)
-    except Exception:
-        # Never crash a background thread over embedding failures
-        with _LOCK:
-            _DB.add_interaction(role, content, context=context, embedding=None)
+            _DB.update_interaction_embedding(interaction_id, blob)
+    except (OSError, ValueError, TypeError, struct.error):
+        # A failed local embedding must not destroy the saved text.
+        pass
+    finally:
+        _EMBEDDING_SLOTS.release()
+
 
 def save_interaction(user_input: str, steps: List[Dict[str, Any]], result: Dict[str, Any]) -> None:
-    """Save interaction with content and metadata (computes vectors in background)."""
-    threading.Thread(target=_fetch_embedding_in_bg, args=("user", user_input, {"steps": steps}), daemon=True).start()
-    threading.Thread(target=_fetch_embedding_in_bg, args=("assistant", str(result.get("output", "")), {"original_query": user_input}), daemon=True).start()
+    """Persist user/assistant text in order before requesting optional embeddings.
+
+    SQLite inserts are bounded and synchronous; embeddings are best-effort.
+    If all worker slots are busy, retain text without an embedding.
+    """
+    user_text = str(user_input or "").strip()
+    result = result if isinstance(result, dict) else {}
+    assistant_text = str(result.get("output") or result.get("message") or "").strip()
+    rows = []
+    with _LOCK:
+        if user_text:
+            rows.append((_DB.add_interaction("user", user_text, {"steps": steps}), user_text))
+        if assistant_text:
+            rows.append((_DB.add_interaction("assistant", assistant_text, {"original_query": user_text}), assistant_text))
+
+    for interaction_id, content in rows:
+        if not _EMBEDDING_SLOTS.acquire(blocking=False):
+            continue  # Message is stored; only optional vector generation is skipped.
+        try:
+            worker = threading.Thread(
+                target=_fetch_embedding_in_bg,
+                args=(interaction_id, content),
+                name="memory-embedding",
+                daemon=True,
+            )
+            worker.start()
+        except (OSError, RuntimeError):
+            _EMBEDDING_SLOTS.release()
+
 
 def get_recent_history(limit: int = 5) -> List[Dict[str, Any]]:
-    """Fetch recent history from SQLite as list of dicts."""
+    """Return actual conversation turns rather than unrelated user/assistant rows."""
+    try:
+        safe_limit = max(1, min(int(limit), 100))
+    except (ValueError, TypeError):
+        safe_limit = 5
+
     with _LOCK:
-        rows = _DB.get_recent_history(limit)
-    # Build into the format ai_engine._format_history expects
-    result = []
+        rows = _DB.get_recent_history(safe_limit * 2 + 2)
+
+    turns: List[Dict[str, Any]] = []
     for row in rows:
-        result.append({
-            "user_input": row.get("content", "") if row.get("role") == "user" else "",
-            "steps": [],
-            "result": {"output": row.get("content", "") if row.get("role") == "assistant" else ""},
-        })
-    return result
+        role = row.get("role")
+        content = str(row.get("content") or "")
+        if role == "user":
+            turns.append({"user_input": content, "steps": [], "result": {}})
+        elif role == "assistant":
+            if turns and not turns[-1]["result"]:
+                turns[-1]["result"] = {"output": content}
+            else:
+                turns.append({"user_input": "", "steps": [], "result": {"output": content}})
+    return turns[-safe_limit:]
+
 
 def get_relevant_context(user_input: str, limit: int = 3) -> List[Dict[str, Any]]:
     """Semantic context retrieval using embeddings (bulk Numpy search)."""
@@ -84,7 +129,9 @@ def get_relevant_context(user_input: str, limit: int = 3) -> List[Dict[str, Any]
         return get_recent_history(limit)
 
     scored = []
-    query_norm = np.linalg.norm(query_vec)
+    query_norm = float(np.linalg.norm(query_vec))
+    if not np.isfinite(query_norm) or query_norm <= 0:
+        return get_recent_history(limit)
 
     for entry in all_embeddings:
         blob = entry["embedding"]
@@ -95,7 +142,14 @@ def get_relevant_context(user_input: str, limit: int = 3) -> List[Dict[str, Any]
         try:
             vec_tuple = struct.unpack(f'{len(blob)//4}f', blob)
             past_vec = np.array(vec_tuple)
-            score = np.dot(query_vec, past_vec) / (query_norm * np.linalg.norm(past_vec))
+            if len(past_vec) != len(query_vec):
+                continue
+            past_norm = float(np.linalg.norm(past_vec))
+            if not np.isfinite(past_norm) or past_norm <= 0:
+                continue
+            score = float(np.dot(query_vec, past_vec)) / (query_norm * past_norm)
+            if not np.isfinite(score):
+                continue
 
             # Boost score for actual knowledge sources
             if role == "knowledge_source":

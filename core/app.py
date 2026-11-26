@@ -977,6 +977,13 @@ class JarvisApp:
         from core.action_policy import get_action_approvals
         get_action_approvals().set_ui_ready(False)
         self._running = False
+        try:
+            from skills.reminder import cancel_all_reminders
+            cancelled = cancel_all_reminders()
+            if cancelled:
+                logger.info("[REMINDER] Cancelled %d pending timers at shutdown", cancelled)
+        except Exception as exc:
+            logger.warning("[REMINDER] Shutdown cleanup failed: %s", exc)
         # Stop File Sorcerer (Phase 23)
         try:
             self._sorcerer.stop()

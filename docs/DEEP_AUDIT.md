@@ -75,3 +75,15 @@ conditional on executor reports**. Unverified external outcomes must stay
 explicitly labeled as such.
 
 See `docs/RELEASE_READINESS.md` for device-level acceptance criteria.
+
+## Additional audit findings — task-result integrity and data safety
+
+Follow-up repair branch `fix/message-evidence-download-safety-memory-reminders` addresses issues verified in the merged source:
+
+- **Communication:** An email previously returned success when its daemon send thread merely started, and WhatsApp/desktop messaging pressed Enter without proving that the selected recipient was right. Email now waits for the SMTP server response and distinguishes *SMTP accepted* from inbox delivery. WhatsApp opens a prefilled draft only; Jarvis does **not** press Send, and draft-opening is not represented as successful delivery. Email sender availability, rate limits and actual mailbox arrival require real account testing.
+- **Network downloads:** The downloader previously allowed HTTP redirects after checking only the original destination; it could also overwrite a previous filename. The new direct-file path revalidates each redirect, caps transfer bytes, uses a temporary file, and links to a free final filename without overwriting. This is **not** DNS-rebinding-resistant network isolation; test high-threat downloads in an external network sandbox. Video downloads are limited to recognized YouTube entry hosts but the underlying yt-dlp network requests are not fully sandboxed.
+- **Memory:** The old per-interaction unbounded embedding threads could outlive shutdown or accumulate, and background persistence risked losing incomplete work. Text is now stored before optional embedding tasks; embedding concurrency has a maximum of eight active workers, and history rows are reconstructed in conversation order.
+- **Reminders:** IDs based on the number of currently active timers were reusable. IDs are now monotonic, active timers are capped, and Jarvis shuts down pending timers. Reminder creation is **not** proof a notification was subsequently displayed.
+- **Automatic file organization:** Watcher callbacks previously slept and moved files after a fixed delay, including downloads that may still be in progress. Partial suffixes are ignored, final rename events can be handled, and sorted filename collisions no longer overwrite existing data. For production use, explicit user permission, file stability retries and a rollback/undo log are still recommended.
+
+Regression tests verify these intended behaviors against mocks/local temporary files. They do **not** establish that messages reached recipients, that an actual browser transfer is protected from every network attack, or that voice/UI hardware works.

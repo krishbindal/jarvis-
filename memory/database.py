@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timedelta
 
 class MemoryDB:
@@ -11,13 +12,13 @@ class MemoryDB:
 
     def __init__(self, db_path="memory/jarvis.db"):
         self.db_path = db_path
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
         self._init_db()
         self.prune()  # Cleanup on every startup
 
     def _init_db(self):
         """Setup SQLite tables."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             cursor = conn.cursor()
 
             # Performance: WAL mode for better concurrent read/write from background threads
@@ -103,7 +104,7 @@ class MemoryDB:
     def prune(self):
         """Remove old rows to prevent unbounded DB growth."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn, conn:
                 cursor = conn.cursor()
 
                 # Cap interactions table
@@ -143,17 +144,26 @@ class MemoryDB:
 
     def add_interaction(self, role, content, context=None, embedding=None):
         """Log a user/ai interaction with optional vector embedding."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO interactions (timestamp, role, content, context, embedding) VALUES (?, ?, ?, ?, ?)",
                 (datetime.now().isoformat(), role, content, str(context) if context else None, embedding)
             )
             conn.commit()
+            return cursor.lastrowid
+
+    def update_interaction_embedding(self, interaction_id: int, embedding: bytes) -> None:
+        """Attach an embedding to an existing interaction without duplicating text."""
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
+            conn.execute(
+                "UPDATE interactions SET embedding = ? WHERE id = ?",
+                (embedding, interaction_id),
+            )
 
     def get_recent_history(self, limit=10):
         """Fetch the last N interactions as dicts."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute(
@@ -164,7 +174,7 @@ class MemoryDB:
 
     def get_all_embeddings(self, limit=500):
         """Fetch recent stored embeddings for vector search (capped to prevent RAM bloat)."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute(
@@ -177,7 +187,7 @@ class MemoryDB:
 
     def get_preference(self, key):
         """Retrieve a learned preference by key."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("SELECT value FROM knowledge WHERE key = ?", (key,))
             res = cursor.fetchone()
@@ -185,7 +195,7 @@ class MemoryDB:
 
     def upsert_knowledge(self, key, value, category='general'):
         """Store or update a learned preference/fact."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO knowledge (key, value, category, updated_at)
@@ -197,7 +207,7 @@ class MemoryDB:
             conn.commit()
     def log_usage(self, action, target):
         """Track app/url usage for habit prediction."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO usage_stats (action, target, timestamp) VALUES (?, ?, ?)",
@@ -207,7 +217,7 @@ class MemoryDB:
 
     def get_top_habits(self, limit=5):
         """Find most frequent actions."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute('''
@@ -223,7 +233,7 @@ class MemoryDB:
 
     def log_observation(self, kind: str, target: str, meta: dict | None = None) -> None:
         """Persist lightweight telemetry from the background observer."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO observations (timestamp, kind, target, meta) VALUES (?, ?, ?, ?)",
@@ -238,7 +248,7 @@ class MemoryDB:
         """
         pattern_key = json.dumps(sequence)
         now = datetime.now().isoformat()
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute(
@@ -258,7 +268,7 @@ class MemoryDB:
 
     def mark_pattern_suggested(self, sequence: list[str]) -> None:
         pattern_key = json.dumps(sequence)
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE patterns SET last_suggested = ? WHERE pattern = ?",
@@ -268,7 +278,7 @@ class MemoryDB:
 
     def get_top_patterns(self, min_count: int = 2, limit: int = 5) -> list[dict]:
         """Return frequent patterns for reporting/suggestions."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute(
@@ -288,7 +298,7 @@ class MemoryDB:
     def add_scheduled_task(self, label: str, command: str, run_at: datetime, recur_seconds: int = 0,
                            auto_execute: bool = False, source: str = "user", metadata: dict | None = None) -> int:
         """Insert a scheduled or recurring task; returns task ID."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(
                 '''
@@ -304,7 +314,7 @@ class MemoryDB:
         """Return pending or recurring tasks that should run at the provided time."""
         ts = now or datetime.now()
         due: list[dict] = []
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute(
@@ -329,7 +339,7 @@ class MemoryDB:
         return due
 
     def mark_task_run(self, task_id: int, status: str = "completed") -> None:
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(
                 '''

@@ -38,16 +38,34 @@ class FileSorceringHandler(FileSystemEventHandler):
         self.event_bus = event_bus
 
     def on_created(self, event):
-        if event.is_directory:
+        if not event.is_directory:
+            self._handle_new_file(Path(event.src_path))
+
+    def on_moved(self, event):
+        # Browsers commonly rename .crdownload/.part to the final filename.
+        if not event.is_directory:
+            self._handle_new_file(Path(event.dest_path))
+
+    def _handle_new_file(self, file_path: Path) -> None:
+        # Never relocate an in-progress or hidden temporary download.
+        if (
+            file_path.name.startswith(".")
+            or file_path.suffix.lower() in {".part", ".crdownload", ".download", ".tmp"}
+            or file_path.parent != self.watch_path
+        ):
             return
-        
-        file_path = Path(event.src_path)
-        # Give a small delay for file to be fully written (e.g. from browser download)
         time.sleep(2)
-        
-        if not file_path.exists():
+        if not file_path.is_file() or file_path.is_symlink():
             return
-            
+        # If still growing, defer to a later event rather than move a partial file.
+        try:
+            first_size = file_path.stat().st_size
+            time.sleep(0.2)
+            if not file_path.is_file() or file_path.stat().st_size != first_size:
+                logger.info("[SORCERER] Skipping file still being written")
+                return
+        except OSError:
+            return
         self._sort_file(file_path)
 
     def _sort_file(self, file_path: Path):
@@ -74,11 +92,17 @@ class FileSorceringHandler(FileSystemEventHandler):
                  new_name = f"{timestamp}_{file_path.name}"
             
             dest_path = dest_dir / new_name
-            
-            # Handle collision
+
+            # Never overwrite a previously sorted file on a name collision.
+            stem, suffix = Path(new_name).stem, Path(new_name).suffix
+            for n in range(1, 1001):
+                if not dest_path.exists():
+                    break
+                dest_path = dest_dir / f"{stem} ({n}){suffix}"
             if dest_path.exists():
-                dest_path = dest_dir / f"{int(time.time())}_{new_name}"
-            
+                logger.warning("[SORCERER] Collision limit reached: %s", new_name)
+                return
+
             shutil.move(str(file_path), str(dest_path))
             logger.info(f"[SORCERER] Organized: {file_path.name} -> {target_folder}/")
             
