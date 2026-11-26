@@ -1,42 +1,47 @@
-"""
-JARVIS-X Phase 26: Omniscient Research
-Skill to perform deep, multi-step research on complex topics.
-"""
+"""A limited, source-backed research lookup — no fabricated web results."""
+from __future__ import annotations
 
-from typing import Dict, Any
+from typing import Any, Dict
+
 from brain.researcher import DeepResearchAgent
-# Local import in execute() will handle the EventBus
+from utils.events import EventBus
 
 SKILL_NAME = "deep_research"
-SKILL_DESCRIPTION = "Perform multi-step deep research on a specified topic."
+SKILL_DESCRIPTION = "Fetch cited encyclopedia excerpts, not comprehensive web research."
 SKILL_PATTERNS = [
     r"deep(?:[- ])research (.+)",
     r"thoroughly research (.+)",
     r"investigate (.+)",
-    r"provide (?:a )?full report on (.+)"
+    r"provide (?:a )?full report on (.+)",
 ]
 
-def execute(target: str, extra: Dict[str, Any]) -> Dict[str, Any]:
-    """Execute the deep research loop."""
-    try:
-        from utils import EventBus
-        bus = EventBus() # Local bus if global not easily available
-        researcher = DeepResearchAgent(event_bus=bus)
-        
-        # Target from regex is the topic
-        topic = target or extra.get("topic", "unspecified topic")
-        
-        report = researcher.perform_research(topic)
-        
-        return {
-            "success": True,
-            "status": "success",
-            "message": f"Sir, I have completed my deep dive into '{topic}'. Here is the briefing.",
-            "output": report
-        }
-    except Exception as e:
+
+def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Fail closed without sources; explicitly label the limited coverage."""
+    options = extra if isinstance(extra, dict) else {}
+    topic = target or options.get("topic", "")
+    if not isinstance(topic, str) or not topic.strip():
         return {
             "success": False,
-            "status": "error",
-            "message": f"Sir, the research cycle failed: {e}"
+            "status": "invalid_topic",
+            "message": "Please provide a research topic.",
         }
+    researcher = DeepResearchAgent(event_bus=EventBus())
+    report = researcher.perform_research(topic.strip())
+    if researcher.source_count == 0:
+        return {
+            "success": False,
+            "status": "no_verified_sources",
+            "message": report,
+            "output": report,
+        }
+    return {
+        "success": True,
+        "status": "sourced_excerpt_retrieval",
+        "message": (
+            f"Retrieved {researcher.source_count} cited encyclopedia excerpts. "
+            "This is not a comprehensive web search or independently verified report."
+        ),
+        "output": report,
+        "source_count": researcher.source_count,
+    }
