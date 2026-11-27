@@ -16,6 +16,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 from utils.logger import get_logger
+from executor.atomic_files import move_file_no_overwrite, SourceRemovalError
 from brain.ai_engine import query_ai
 
 logger = get_logger(__name__)
@@ -69,51 +70,65 @@ class FileSorceringHandler(FileSystemEventHandler):
         self._sort_file(file_path)
 
     def _sort_file(self, file_path: Path):
-        ext = file_path.suffix.lower()
-        target_folder = "Others"
-        
-        for category, extensions in CATEGORIES.items():
-            if ext in extensions:
-                target_folder = category
-                break
-        
-        # Create 'Sorted' subfolder in the watched directory
-        base_sorted = self.watch_path / "Jarvis_Sorted"
-        dest_dir = base_sorted / target_folder
-        
-        try:
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Smart Renaming if it's a generic generic name
-            new_name = file_path.name
-            if len(file_path.stem) < 5 and file_path.stem.isdigit():
-                 # Example: 1234.pdf -> 2024-04-04_1234.pdf
-                 timestamp = time.strftime("%Y-%m-%d")
-                 new_name = f"{timestamp}_{file_path.name}"
-            
-            dest_path = dest_dir / new_name
+        # Refuse external paths, symlinks or stale events.
+        if (
+            not file_path.is_file() or file_path.is_symlink()
+            or file_path.parent.resolve() != self.watch_path.resolve()
+        ):
+            return
 
-            # Never overwrite a previously sorted file on a name collision.
-            stem, suffix = Path(new_name).stem, Path(new_name).suffix
-            for n in range(1, 1001):
-                if not dest_path.exists():
+        ext = file_path.suffix.lower()
+        category = next(
+            (name for name, extensions in CATEGORIES.items() if ext in extensions),
+            "Others",
+        )
+        base_sorted = self.watch_path / "Jarvis_Sorted"
+        dest_dir = base_sorted / category
+
+        try:
+            # A replaced sorting directory must never silently relocate
+            # downloads outside the watched directory.
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest_dir.resolve().relative_to(self.watch_path.resolve())
+
+            name = file_path.name
+            if len(file_path.stem) < 5 and file_path.stem.isdigit():
+                name = time.strftime("%Y-%m-%d") + "_" + name
+
+            stem, suffix = Path(name).stem, Path(name).suffix
+            published = None
+            for number in range(1001):
+                candidate = (
+                    dest_dir / name if number == 0
+                    else dest_dir / f"{stem} ({number}){suffix}"
+                )
+                try:
+                    move_file_no_overwrite(file_path, candidate)
+                    published = candidate
                     break
-                dest_path = dest_dir / f"{stem} ({n}){suffix}"
-            if dest_path.exists():
-                logger.warning("[SORCERER] Collision limit reached: %s", new_name)
+                except FileExistsError:
+                    # Even if a concurrent downloader created this name after
+                    # the check, do not replace its bytes.
+                    continue
+
+            if published is None:
+                logger.warning("[SORCERER] Collision limit reached for %s", name)
                 return
 
-            shutil.move(str(file_path), str(dest_path))
-            logger.info(f"[SORCERER] Organized: {file_path.name} -> {target_folder}/")
-            
+            logger.info("[SORCERER] Organized %s into %s", file_path.name, category)
             self.event_bus.emit("file_sorted", {
                 "original": file_path.name,
-                "category": target_folder,
-                "path": str(dest_path)
+                "category": category,
+                "path": str(published),
             })
-            
-        except Exception as e:
-            logger.error(f"[SORCERER] Failed to move {file_path.name}: {e}")
+        except SourceRemovalError:
+            logger.error(
+                "[SORCERER] Destination was published but source cleanup failed; "
+                "review both files manually."
+            )
+        except (OSError, ValueError) as exc:
+            logger.warning("[SORCERER] Sorting skipped (%s)", type(exc).__name__)
+
 
 class FileSorcerer:
     """Manages watchers for Desktop and Downloads."""
