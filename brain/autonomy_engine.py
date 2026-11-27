@@ -223,6 +223,14 @@ class AutonomyEngine:
 
     # --─ Scheduler & Auto Tasks ------------------------------
 
+    def _active_open_target(self, command: str) -> bool:
+        """Check one simple open-app request against the currently active process."""
+        if not isinstance(command, str) or not command.lower().startswith("open "):
+            return False
+        target = command.split(" ", 1)[1].strip().lower()
+        current = (self._context.current_app or "").strip().lower()
+        return bool(target and current and target.removesuffix(".exe") == current.removesuffix(".exe"))
+
     def _check_schedules(self) -> None:
         pending = due_tasks()
         if not pending:
@@ -241,7 +249,7 @@ class AutonomyEngine:
                 continue
 
             # Context-aware: avoid re-opening an app already active
-            if self._context.current_app and self._context.current_app.lower() in command.lower():
+            if self._active_open_target(command):
                 logger.debug("[AUTONOMY] Skipping '%s' because it is already active.", label)
                 # A no-op because an app is already active is not an action
                 # that was executed; do not record a completed device task.
@@ -282,10 +290,15 @@ class AutonomyEngine:
                 return None  # Dispatch is not a verified action result.
             # Heuristic: if command resembles 'open <target>' try direct action to keep it deterministic
             lowered = command.lower()
-            if lowered.startswith("open "):
+            # Compound commands belong to the main planner; opening the
+            # entire string as an app name would fail or launch the wrong app.
+            simple_open = lowered.startswith("open ") and not any(
+                token in lowered for token in (" and ", " then ", ";", "\n")
+            )
+            if simple_open:
                 target = command.split(" ", 1)[1].strip()
-                if self._context.current_app and target.lower() in (self._context.current_app or "").lower():
-                    logger.info("[AUTONOMY] %s already active; skipping.", target)
+                if self._active_open_target(command):
+                    logger.info("[AUTONOMY] %s already active; no launch required.", target)
                     return True
                 result = execute_action("open_app", target)
                 if not isinstance(result, dict) or result.get("success") is not True:
