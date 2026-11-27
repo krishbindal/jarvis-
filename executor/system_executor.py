@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from config import SAFE_DIRECTORIES, ALLOW_UNRESTRICTED_FS
-from executor.atomic_files import copy_file_no_overwrite, move_file_no_overwrite, SourceRemovalError
+from executor.atomic_files import copy_file_no_overwrite, move_file_no_overwrite, SourceRemovalError, StagingVerificationError
 from utils.logger import get_logger
 
 try:
@@ -198,6 +198,9 @@ def copy_file(src: str, dest: str) -> Dict:
         except FileExistsError:
             return {"success": False, "status": "already_exists",
                     "message": "A second writer created the destination; no existing file was overwritten."}
+        except StagingVerificationError:
+            return {"success": False, "status": "verification_failed",
+                    "message": "Staged copy did not match the source; no file was published."}
         if not dest_path.is_file() or dest_path.stat().st_size != source_path.stat().st_size:
             return {"success": False, "status": "verification_failed",
                     "message": "Copy returned without a matching destination file size."}
