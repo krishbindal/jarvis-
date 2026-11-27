@@ -164,3 +164,9 @@ The old `diagnostics/reports/setup_report.json` was removed because its machine-
 The browser skill does **not** attach to your existing Chrome/Edge tabs. `scroll this page`, `open first result` and `extract from current page` now return an explicit **unavailable** status instead of opening a fresh blank tab and falsely claiming success. To read content, supply an explicit URL (for example, `read this page https://example.com/article`). Playwright opens a temporary headless browser, observes HTTP response and visible text, and closes the browser.
 
 `go to example.com` requests an operating-system/browser handoff only; it does not prove the page loaded. Google searching reports only the headings actually observed on the result page, URL-encodes the query and does **not** claim that headings verify the underlying links or facts. Playwright Chromium must be installed for content fetching. A full persisted-browser session controller remains an open feature, not a completed capability.
+
+### Music downloads and playback evidence
+
+The `music` skill now waits for `yt-dlp` to complete and checks that a **nonempty MP3** exists before reporting a download. Each destination filename is unique, so an existing file is not overwritten. Download or conversion failure returns an error, not a premature success.
+
+Playback requires `pygame.mixer.music.play()` to return without error **and** the mixer to report active playback. That confirms the mixer state, **not** audible sound from your laptop speakers. `pause music` and `stop music` report the mixer operation actually requested. Downloads need internet, `yt-dlp`, and a compatible ffmpeg installation; playback additionally needs a working audio output device. Background threads no longer announce completion before it can be checked. Source media rights remain the user's responsibility.
