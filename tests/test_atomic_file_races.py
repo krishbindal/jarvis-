@@ -148,7 +148,10 @@ class AtomicFilePublicationTests(unittest.TestCase):
             root = Path(folder)
             source = root / "report.pdf"
             source.write_bytes(b"keep")
-            (root / "Jarvis_Sorted").symlink_to(external, target_is_directory=True)
+            try:
+                (root / "Jarvis_Sorted").symlink_to(external, target_is_directory=True)
+            except OSError:
+                self.skipTest("This runner does not allow creation of directory symlinks")
             handler = FileSorceringHandler(str(root), MagicMock())
             handler._sort_file(source)
             self.assertTrue(source.is_file())
