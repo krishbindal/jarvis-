@@ -108,6 +108,7 @@ def execute_automation_plan(
     context_state=None,
     events=None,
     interactions=None,
+    cancel_event=None,
 ) -> Dict[str, Any]:
     """
     Execute an automation plan step-by-step with feedback and context tracking.
@@ -118,9 +119,13 @@ def execute_automation_plan(
     _safe_emit(events, "command_progress", {"stage": "plan", "text": plan.goal or "automation"})
 
     for idx, step in enumerate(plan.steps, start=1):
+        if cancel_event is not None and cancel_event.is_set():
+            break
         _safe_emit(events, "command_progress", {"stage": f"step_{idx}", "text": f"{step.action}: {step.target}"})
         _announce(interactions, step.action, step.target)
 
+        if cancel_event is not None and cancel_event.is_set():
+            break
         try:
             result = normalize_executor_result(_execute_step(step, context_state), step.action)
         except Exception:
@@ -149,6 +154,8 @@ def execute_automation_plan(
             break
 
     observed = summarize_execution_results(step_results, expected=len(plan.steps))
+    if cancel_event is not None and cancel_event.is_set() and len(step_results) < len(plan.steps):
+        observed.update(success=False, status="cancelled", message="Automation cancelled before remaining steps; completed actions were not undone.")
     return {
         "success": observed["success"],
         "status": observed["status"],
