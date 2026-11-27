@@ -129,7 +129,7 @@ def execute_automation_plan(
         try:
             result = normalize_executor_result(_execute_step(step, context_state), step.action)
         except Exception:
-            logger.exception("Automation step failed: %s", step.action)
+            logger.error("Automation step failed: %s", step.action)
             result = {"success": False, "status": "error",
                       "message": "Automation step raised an exception; its external outcome is unverified."}
         step_result = {
