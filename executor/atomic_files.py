@@ -12,6 +12,10 @@ import shutil
 import tempfile
 
 
+class StagingVerificationError(OSError):
+    """A staging copy did not produce the complete expected file."""
+
+
 class SourceRemovalError(OSError):
     """Destination was published but source unlink failed: partial move."""
 
@@ -40,7 +44,7 @@ def copy_file_no_overwrite(source: Path, destination: Path) -> None:
     try:
         shutil.copy2(source, staged)
         if not staged.is_file() or staged.stat().st_size != source.stat().st_size:
-            raise OSError("Staged file size does not match the source.")
+            raise StagingVerificationError("Staged file size does not match the source.")
         # Fails atomically with FileExistsError if another writer won the race.
         os.link(staged, destination)
     finally:
