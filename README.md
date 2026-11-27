@@ -182,3 +182,9 @@ System-check command replies now state that they generated a **non-invasive** di
 ### AI explanations without tool execution
 
 A valid AI JSON response may deliberately contain `"steps": []` with a meaningful explanation, such as why a requested action is unavailable. Groq, Gemini and Ollama now accept that **only when the JSON structure is valid**; malformed content is not converted into an apparent no-action response. Jarvis displays the AI explanation under `not_executed`, explicitly saying that no tool ran and the answer has not been independently verified. A model-generated response alone is never evidence that a file was changed, a message was sent, or a website was opened.
+
+### Source-linked quick search
+
+The `quick_search` action now reports success **only when the DuckDuckGo provider actually returns attributable HTTPS search-result URLs**. Each result displays a title, the original URL, and a clearly marked *unverified search snippet*. Missing results, unavailable providers, malformed or local-network links cannot count as successful research. The result's `source_count` is the number of accepted links, **not** the number of fact-checked articles.
+
+This action does **not** visit the referenced pages, independently verify claims, or provide comprehensive research. Such evidence needs a separate browser/source-reading workflow with user permission.
