@@ -188,3 +188,9 @@ A valid AI JSON response may deliberately contain `"steps": []` with a meaningfu
 The `quick_search` action now reports success **only when the DuckDuckGo provider actually returns attributable HTTPS search-result URLs**. Each result displays a title, the original URL, and a clearly marked *unverified search snippet*. Missing results, unavailable providers, malformed or local-network links cannot count as successful research. The result's `source_count` is the number of accepted links, **not** the number of fact-checked articles.
 
 This action does **not** visit the referenced pages, independently verify claims, or provide comprehensive research. Such evidence needs a separate browser/source-reading workflow with user permission.
+
+### Concurrent filesystem collisions
+
+`copy_file`, `move_file`, and `rename_file` now publish regular files using an atomic **no-overwrite** hard-link step instead of check-then-copy or check-then-rename. If another process creates the destination during the operation, Jarvis refuses rather than replacing that file. The opt-in file organizer uses the same safeguard and tries a numbered filename for collisions. Staging files are cleaned up after copy attempts.
+
+**Limitations:** The move/rename helper requires filesystem hard-link support and cannot move files across separate volumes. Unsupported operations fail without automatically falling back to overwrite-capable APIs. Moving/renaming directories is not supported by these regular-file actions. If a file is published but source deletion fails, Jarvis reports a partial outcome; inspect both files before retrying. These safeguards are not an operating-system sandbox and do not prevent other applications from modifying files they own.
