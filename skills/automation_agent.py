@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Dict
-from urllib.parse import urlsplit
+from core.webhook_safety import validate_webhook_url
 
 import requests
 
@@ -31,21 +31,8 @@ _MAX_JSON_BYTES = 16384
 
 
 def _validate_configured_url(url: Any) -> str | None:
-    if not isinstance(url, str) or not url or len(url) > 2048:
-        return "No valid n8n webhook URL is configured; no workflow was triggered."
-    try:
-        parts = urlsplit(url)
-        hostname = (parts.hostname or "").lower()
-        # HTTPS is mandatory for non-loopback endpoints; credentials in URL
-        # are rejected because they can be leaked through logs and proxies.
-        if parts.username or parts.password or parts.fragment or not hostname:
-            return "n8n webhook URL contains unsupported credentials, fragment or host."
-        loopback = hostname in {"localhost", "127.0.0.1", "::1"}
-        if parts.scheme != "https" and not (loopback and parts.scheme == "http"):
-            return "n8n webhook must use HTTPS except for explicit localhost/loopback."
-    except ValueError:
-        return "n8n webhook URL is malformed."
-    return None
+    """Backward-compatible wrapper around the shared webhook guard."""
+    return validate_webhook_url(url)
 
 
 def execute(target: str, extra: Dict[str, Any] = None) -> Dict[str, Any]:
