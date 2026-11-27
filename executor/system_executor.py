@@ -568,14 +568,94 @@ def run_system_check(target: str = "") -> Dict:
         return {"success": False, "status": "error", "message": f"Diagnostic tool failed: {str(exc)}"}
 
 def quick_search(query: str) -> Dict:
+    """Retrieve attributable DuckDuckGo snippets, not verified factual answers.
+
+    The external service may return wrong or misleading content. Without real
+    HTTPS source URLs, no successful search is reported.
+    """
+    from urllib.parse import urlsplit
+    import ipaddress
+
+    if not isinstance(query, str) or not query.strip() or len(query) > 300:
+        return {
+            "success": False,
+            "status": "invalid_query",
+            "message": "Search query must contain 1–300 characters.",
+        }
+    query = query.strip()
     try:
         from duckduckgo_search import DDGS
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=3))
-        if not results:
-            return {"success": True, "status": "success", "message": f"No results found for '{query}'", "output": "No matches."}
-        
-        snippets = "\n".join([f"- {r.get('title')}: {r.get('body')}" for r in results])
-        return {"success": True, "status": "success", "message": f"Web search for '{query}' complete.", "output": snippets}
     except Exception as exc:
-        return {"success": False, "status": "error", "message": f"Web search failed: {str(exc)}"}
+        logger.warning("[SEARCH] External search failed (%s)", type(exc).__name__)
+        return {
+            "success": False,
+            "status": "search_unavailable",
+            "message": "Search provider was unavailable; no sources were retrieved.",
+        }
+
+    sources = []
+    seen_urls = set()
+    for result in results[:3]:
+        if not isinstance(result, dict):
+            continue
+        title = result.get("title")
+        url = result.get("href") or result.get("url")
+        summary = result.get("body")
+        if not all(isinstance(value, str) for value in (title, url, summary)):
+            continue
+        try:
+            parts = urlsplit(url)
+            if (
+                parts.scheme != "https" or not parts.hostname
+                or parts.username or parts.password
+                or parts.hostname in {"localhost", "127.0.0.1", "::1"}
+            ):
+                continue
+        except ValueError:
+            continue
+        if len(url) > 2048:
+            continue
+        try:
+            address = ipaddress.ip_address(parts.hostname)
+            if not address.is_global:
+                continue
+        except ValueError:
+            pass  # A hostname, not a literal IP address.
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+        sources.append({
+            "title": " ".join(title.split())[:180],
+            "url": url,
+            "snippet": " ".join(summary.split())[:400],
+        })
+
+    if not sources:
+        return {
+            "success": False,
+            "status": "no_attributable_results",
+            "message": (
+                "No search snippets with attributable HTTPS source links were retrieved. "
+                "Jarvis cannot claim to have found an answer."
+            ),
+            "source_count": 0,
+        }
+
+    body = "\n\n".join(
+        f"[{index}] {item['title']}\nURL: {item['url']}\n"
+        f"Unverified search snippet: {item['snippet']}"
+        for index, item in enumerate(sources, start=1)
+    )
+    return {
+        "success": True,
+        "status": "sources_retrieved",
+        "message": (
+            f"Retrieved {len(sources)} attributable search snippets. "
+            "The underlying pages and facts have NOT been verified."
+        ),
+        "output": body,
+        "source_count": len(sources),
+        "sources": sources,
+    }
