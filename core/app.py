@@ -68,6 +68,8 @@ class JarvisApp:
         self._running = True
         # One command at a time; reject overlaps instead of racing on context.
         self._command_gate = threading.BoundedSemaphore(1)
+        self._command_cancel = threading.Event()
+        self._command_admission = threading.Lock()
         self._ui_app = None
         self._ui_window = None
         self._ui_overlay = None
@@ -281,7 +283,13 @@ class JarvisApp:
         text = payload["text"].strip().lower()
         if not text:
             return
-        if not self._command_gate.acquire(blocking=False):
+        with self._command_admission:
+            admitted = self._command_gate.acquire(blocking=False)
+            if admitted:
+                self._command_cancel.clear()
+            elif text in ("stop", "cancel", "abort", "stop everything", "kill task"):
+                self._command_cancel.set()
+        if not admitted:
             if text in ("stop", "cancel", "abort", "stop everything", "kill task"):
                 from core.action_policy import get_action_approvals
                 get_action_approvals().cancel_all()
@@ -584,7 +592,8 @@ class JarvisApp:
             return None
 
         logger.info("[AUTOMATION] %s", plan.summary())
-        result = execute_automation_plan(plan, self._context, self._events, self._interactions)
+        result = execute_automation_plan(plan, self._context, self._events, self._interactions,
+                                         cancel_event=self._command_cancel)
         payload = {
             "type": "automation",
             "goal": plan.goal or raw_text,
@@ -611,6 +620,8 @@ class JarvisApp:
         reported = []
         previous = None
         for index, planned in enumerate(steps):
+            if self._command_cancel.is_set():
+                break
             action = planned.get("action", "") if isinstance(planned, dict) else ""
             target = planned.get("target", "") if isinstance(planned, dict) else ""
             extra = planned.get("extra", {}) if isinstance(planned, dict) else {}
@@ -647,6 +658,8 @@ class JarvisApp:
             previous = outcome
 
         summary = summarize_execution_results(reported, expected=len(steps))
+        if self._command_cancel.is_set() and len(reported) < len(steps):
+            summary.update(success=False, status="cancelled", message="Remaining steps cancelled; completed actions were not undone.")
         final_result = {**summary, "type": "multi_step", "steps": reported}
         self._events.emit("command_result", final_result)
         return final_result, interaction_steps
@@ -851,6 +864,11 @@ class JarvisApp:
                     return result_payload, executed_steps
                 seen_steps.add(step_key)
 
+                if self._command_cancel.is_set():
+                    result_payload = self._agent_report(executed_steps, "Stopping: user requested cancellation.")
+                    result_payload.update(success=False, status="cancelled", message="Agent cancelled before the next tool; completed actions were not undone.")
+                    self._events.emit("command_result", result_payload)
+                    return result_payload, executed_steps
                 before_ctx = self._context.snapshot()
                 result = self._execute_tool_step(tool, input_arg)
                 self._context.update_after_action(tool, input_arg, {}, result)
