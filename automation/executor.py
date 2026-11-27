@@ -121,7 +121,12 @@ def execute_automation_plan(
         _safe_emit(events, "command_progress", {"stage": f"step_{idx}", "text": f"{step.action}: {step.target}"})
         _announce(interactions, step.action, step.target)
 
-        result = normalize_executor_result(_execute_step(step, context_state), step.action)
+        try:
+            result = normalize_executor_result(_execute_step(step, context_state), step.action)
+        except Exception:
+            logger.exception("Automation step failed: %s", step.action)
+            result = {"success": False, "status": "error",
+                      "message": "Automation step raised an exception; its external outcome is unverified."}
         step_result = {
             "action": step.action,
             "target": result.get("resolved_target", step.target),
