@@ -555,7 +555,15 @@ def run_system_check(target: str = "") -> Dict:
             errors="replace",
             timeout=45,
         )
-        return {"success": True, "status": "success", "message": "Master Diagnostic complete.", "output": res}
+        return {
+            "success": True,
+            "status": "diagnostic_report_generated",
+            "message": (
+                "Non-invasive diagnostic report generated; live Windows hardware, "
+                "AI providers and end-to-end actions were NOT tested."
+            ),
+            "output": res,
+        }
     except Exception as exc:
         return {"success": False, "status": "error", "message": f"Diagnostic tool failed: {str(exc)}"}
 
