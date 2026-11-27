@@ -3,7 +3,7 @@ import time
 import requests
 from utils.logger import get_logger
 from config import MODEL_NAME
-from brain.providers.base import AIProvider, _safe_json_extract, _validate_steps
+from brain.providers.base import AIProvider, _safe_json_extract, _validate_steps, _valid_command_response
 from brain.provider_config import NORMAL_TIMEOUT
 
 OLLAMA_BASE = "http://localhost:11434"
@@ -54,10 +54,10 @@ class OllamaProvider(AIProvider):
             resp.raise_for_status()
             output = resp.json().get("message", {}).get("content", "")
             parsed = _safe_json_extract(output)
-            if parsed.get("steps"):
+            if _valid_command_response(parsed):
                 logger.info(f"[AI] {self.name} ({MODEL_NAME}) successful.")
                 return _validate_steps(parsed)
-            raise ValueError(f"{self.name} output did not contain valid steps.")
+            raise ValueError(f"{self.name} output was not a valid structured command or explanation.")
         except Exception as e:
             logger.warning(f"[AI] {self.name} failed (Local): {e}")
             raise
