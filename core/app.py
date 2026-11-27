@@ -663,6 +663,21 @@ class JarvisApp:
             ai_result = interpret_command(text, history=history_entries, relevant=relevant_entries)
             steps = ai_result.get("steps") or []
             if not steps:
+                # A valid no-action response may explain limitations or answer
+                # a conversational question, but proves no task execution.
+                explanation = ai_result.get("message")
+                if isinstance(explanation, str) and explanation.strip():
+                    return {
+                        "action": "ai_explanation",
+                        "success": False,
+                        "status": "not_executed",
+                        "message": (
+                            "No action was executed. AI explanation (not independently "
+                            "verified): " + " ".join(explanation.split())[:280]
+                        ),
+                        "type": "ai",
+                        "steps": [],
+                    }, []
                 return {
                     "action": "unknown",
                     "success": False,

@@ -28,10 +28,33 @@ class AIProvider(ABC):
         pass
 
 def _safe_json_extract(text: str) -> Dict[str, Any]:
-    data = parse_json_block(text)
-    if not data:
-        return {"steps": [], "type": "ai", "message": "AI parsing failed"}
-    return data
+    """Malformed output is never rewritten as a valid no-action response."""
+    return parse_json_block(text)
+
+
+def _valid_command_response(data: Dict[str, Any]) -> bool:
+    """Distinguish a valid empty plan from malformed AI JSON.
+
+    Zero steps are legal only with an explicit explanation. A missing or
+    non-list steps field, invalid individual step or oversized plan fails.
+    Execution still passes through the independent action plan guard.
+    """
+    if not isinstance(data, dict):
+        return False
+    raw_steps = data.get("steps")
+    if not isinstance(raw_steps, list) or len(raw_steps) > MAX_STEPS:
+        return False
+    if not raw_steps:
+        msg = data.get("message")
+        return isinstance(msg, str) and bool(msg.strip())
+    return all(
+        isinstance(step, dict)
+        and isinstance(step.get("action"), str)
+        and bool(step["action"].strip())
+        and isinstance(step.get("target", ""), str)
+        and isinstance(step.get("extra", {}), dict)
+        for step in raw_steps
+    )
 
 
 def _validate_steps(data: Dict[str, Any]) -> Dict[str, Any]:

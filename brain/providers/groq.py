@@ -2,7 +2,7 @@ from typing import Dict, Any
 from groq import Groq
 from utils.logger import get_logger
 from config import GROQ_API_KEY
-from brain.providers.base import AIProvider, _safe_json_extract, _validate_steps
+from brain.providers.base import AIProvider, _safe_json_extract, _validate_steps, _valid_command_response
 from brain.provider_config import PRIMARY_MODEL, FALLBACK_MODEL, FAST_MODEL, COMMAND_TEMP, QUERY_TEMP, NORMAL_TIMEOUT
 
 logger = get_logger(__name__)
@@ -36,7 +36,7 @@ class GroqProvider(AIProvider):
                 )
                 output = completion.choices[0].message.content
                 parsed = _safe_json_extract(output)
-                if parsed.get("steps"):
+                if _valid_command_response(parsed):
                     logger.info(f"[AI] {self.name} ({current_model}) successful.")
                     return _validate_steps(parsed)
             except Exception as e:

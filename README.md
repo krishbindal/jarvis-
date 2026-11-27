@@ -178,3 +178,7 @@ The n8n automation skill now **fails** when no webhook URL is configured; it no 
 FFmpeg MP3 and Pillow PDF conversions use unique final filenames and a temporary directory, never `-y` overwriting previous files. MP3 conversion has a 120-second timeout. A successful result requires an observed nonempty output file; PDF additionally checks the file signature. These checks do **not** prove audio quality or PDF rendering. Conversion actions still require explicit user approval.
 
 System-check command replies now state that they generated a **non-invasive** diagnostic inventory, not that microphones, speakers, cloud providers, or desktop actions have been validated.
+
+### AI explanations without tool execution
+
+A valid AI JSON response may deliberately contain `"steps": []` with a meaningful explanation, such as why a requested action is unavailable. Groq, Gemini and Ollama now accept that **only when the JSON structure is valid**; malformed content is not converted into an apparent no-action response. Jarvis displays the AI explanation under `not_executed`, explicitly saying that no tool ran and the answer has not been independently verified. A model-generated response alone is never evidence that a file was changed, a message was sent, or a website was opened.
