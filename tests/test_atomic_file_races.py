@@ -155,7 +155,7 @@ class AtomicFilePublicationTests(unittest.TestCase):
             handler = FileSorceringHandler(str(root), MagicMock())
             handler._sort_file(source)
             self.assertTrue(source.is_file())
-            self.assertFalse((Path(external) / "Documents" / "report.pdf").exists())
+            self.assertFalse((Path(external) / "Documents").exists(), "No folder may be created outside the watched directory")
             handler.event_bus.emit.assert_not_called()
 
 
