@@ -170,3 +170,11 @@ The browser skill does **not** attach to your existing Chrome/Edge tabs. `scroll
 The `music` skill now waits for `yt-dlp` to complete and checks that a **nonempty MP3** exists before reporting a download. Each destination filename is unique, so an existing file is not overwritten. Download or conversion failure returns an error, not a premature success.
 
 Playback requires `pygame.mixer.music.play()` to return without error **and** the mixer to report active playback. That confirms the mixer state, **not** audible sound from your laptop speakers. `pause music` and `stop music` report the mixer operation actually requested. Downloads need internet, `yt-dlp`, and a compatible ffmpeg installation; playback additionally needs a working audio output device. Background threads no longer announce completion before it can be checked. Source media rights remain the user's responsibility.
+
+### Webhook and conversion outcome safeguards
+
+The n8n automation skill now **fails** when no webhook URL is configured; it no longer simulates success. For a configured endpoint, external URLs require HTTPS (local loopback can use HTTP). Redirects are rejected, request parameters are size-limited, and an HTTP 200/201/202/204 only means the webhook **accepted** the request—not that a downstream workflow or device completed an action. User approval remains required for the automation skill.
+
+FFmpeg MP3 and Pillow PDF conversions use unique final filenames and a temporary directory, never `-y` overwriting previous files. MP3 conversion has a 120-second timeout. A successful result requires an observed nonempty output file; PDF additionally checks the file signature. These checks do **not** prove audio quality or PDF rendering. Conversion actions still require explicit user approval.
+
+System-check command replies now state that they generated a **non-invasive** diagnostic inventory, not that microphones, speakers, cloud providers, or desktop actions have been validated.
