@@ -243,16 +243,25 @@ class AutonomyEngine:
             # Context-aware: avoid re-opening an app already active
             if self._context.current_app and self._context.current_app.lower() in command.lower():
                 logger.debug("[AUTONOMY] Skipping '%s' because it is already active.", label)
-                mark_task_run(task_id, status="completed")
+                # A no-op because an app is already active is not an action
+                # that was executed; do not record a completed device task.
+                mark_task_run(task_id, status="recurring" if recur else "skipped_active")
                 continue
 
             if auto and not self._interrupted:
                 logger.info("[AUTONOMY] Auto-running scheduled task '%s'", label)
-                success = self._execute_safe_command(command)
-                if recur and success:
+                outcome = self._execute_safe_command(command)
+                if recur and outcome is not False:
+                    # Recurrence is maintained; a queued command is not proof
+                    # that the previous occurrence actually completed.
                     mark_task_run(task_id, status="recurring")
+                elif outcome is True:
+                    mark_task_run(task_id, status="completed")
+                elif outcome is None:
+                    logger.info("[AUTONOMY] Scheduled task %s dispatched, result unverified", task_id)
+                    mark_task_run(task_id, status="dispatched_unverified")
                 else:
-                    mark_task_run(task_id, status="completed" if success else "failed")
+                    mark_task_run(task_id, status="failed")
             else:
                 message = f"Reminder: '{label}' is scheduled now. Shall I handle it?"
                 self._bus.emit("autonomy_suggestion", {
@@ -265,12 +274,12 @@ class AutonomyEngine:
 
     # --─ Execution Helpers ----------------------------------─
 
-    def _execute_safe_command(self, command: str) -> bool:
-        """Execute via action registry with self-healing fallbacks."""
+    def _execute_safe_command(self, command: str) -> bool | None:
+        """Return True/False only for observed results; None for queued work."""
         try:
             if execute_action is None:
                 self._bus.emit("command_received", {"text": command, "source": "autonomy"})
-                return True
+                return None  # Dispatch is not a verified action result.
             # Heuristic: if command resembles 'open <target>' try direct action to keep it deterministic
             lowered = command.lower()
             if lowered.startswith("open "):
@@ -279,14 +288,16 @@ class AutonomyEngine:
                     logger.info("[AUTONOMY] %s already active; skipping.", target)
                     return True
                 result = execute_action("open_app", target)
-                if not result.get("success", True):
+                if not isinstance(result, dict) or result.get("success") is not True:
                     result = execute_action("open_dynamic", target, {"resolved_type": "app"})
-                self._context.update_after_action("open_app", target, {}, result)
-                return bool(result.get("success", False))
+                if isinstance(result, dict) and result.get("success") is True:
+                    self._context.update_after_action("open_app", target, {}, result)
+                    return True
+                return False
 
             # Fallback: let the main pipeline parse the natural command
             self._bus.emit("command_received", {"text": command, "source": "autonomy"})
-            return True
+            return None  # A downstream worker may still reject or fail.
         except Exception as exc:  # noqa: BLE001
             logger.error("[AUTONOMY] Command execution failed: %s", exc)
             return False
