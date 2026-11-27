@@ -88,6 +88,9 @@ class FileSorceringHandler(FileSystemEventHandler):
         try:
             # A replaced sorting directory must never silently relocate
             # downloads outside the watched directory.
+            # Check the parent *before* mkdir: a symlink to an external
+            # directory must not cause even an empty folder to be created.
+            base_sorted.resolve().relative_to(self.watch_path.resolve())
             dest_dir.mkdir(parents=True, exist_ok=True)
             dest_dir.resolve().relative_to(self.watch_path.resolve())
 
