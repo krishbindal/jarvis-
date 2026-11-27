@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from config import SAFE_DIRECTORIES, ALLOW_UNRESTRICTED_FS
+from executor.atomic_files import copy_file_no_overwrite, move_file_no_overwrite, SourceRemovalError
 from utils.logger import get_logger
 
 try:
@@ -154,13 +155,21 @@ def move_file(src: str, dest: str) -> Dict:
         dest_path = dest_path.resolve()
         if not _is_safe(dest_path):
             raise UnsafePathError(f"Destination is outside allowed directories: {dest_path}")
-        if not source_path.exists():
-            return {"success": False, "status": "error", "message": "Move source does not exist."}
+        if not source_path.is_file():
+            return {"success": False, "status": "unsupported",
+                    "message": "Move supports regular files only; directories were not moved."}
         if dest_path.exists() or source_path == dest_path:
             return {"success": False, "status": "already_exists",
                     "message": "Move refused: destination exists or matches source; no files were overwritten."}
-        shutil.move(str(source_path), str(dest_path))
-        if not dest_path.exists():
+        try:
+            move_file_no_overwrite(source_path, dest_path)
+        except FileExistsError:
+            return {"success": False, "status": "already_exists",
+                    "message": "A second writer created the destination; no existing file was overwritten."}
+        except SourceRemovalError:
+            return {"success": False, "status": "partial",
+                    "message": "Destination published but removing source failed; both files may exist."}
+        if source_path.exists() or not dest_path.is_file():
             return {"success": False, "status": "verification_failed",
                     "message": "Move returned without a file at the destination."}
         logger.info("Moved %s to %s", source_path, dest_path)
@@ -184,7 +193,11 @@ def copy_file(src: str, dest: str) -> Dict:
         if dest_path.exists() or source_path == dest_path:
             return {"success": False, "status": "already_exists",
                     "message": "Copy refused: destination exists or matches source; no files were overwritten."}
-        shutil.copy2(str(source_path), str(dest_path))
+        try:
+            copy_file_no_overwrite(source_path, dest_path)
+        except FileExistsError:
+            return {"success": False, "status": "already_exists",
+                    "message": "A second writer created the destination; no existing file was overwritten."}
         if not dest_path.is_file() or dest_path.stat().st_size != source_path.stat().st_size:
             return {"success": False, "status": "verification_failed",
                     "message": "Copy returned without a matching destination file size."}
@@ -198,16 +211,26 @@ def copy_file(src: str, dest: str) -> Dict:
 def rename_file(path: str, new_name: str) -> Dict:
     try:
         source = _safe_path(path)
+        if not isinstance(new_name, str) or new_name in ("", ".", "..") or "/" in new_name or "\\" in new_name:
+            return {"success": False, "status": "invalid_name", "message": "A single safe filename is required."}
         dest = source.with_name(new_name)
         if not _is_safe(dest):
             raise ValueError(f"Path not allowed: {dest}")
-        if not source.exists():
-            return {"success": False, "status": "error", "message": "Rename source does not exist."}
+        if not source.is_file():
+            return {"success": False, "status": "unsupported",
+                    "message": "Rename supports regular files only; directories were not moved."}
         if dest.exists() or source == dest:
             return {"success": False, "status": "already_exists",
                     "message": "Rename refused: destination already exists; no files were overwritten."}
-        source.rename(dest)
-        if not dest.exists():
+        try:
+            move_file_no_overwrite(source, dest)
+        except FileExistsError:
+            return {"success": False, "status": "already_exists",
+                    "message": "A second writer created the destination; no existing file was overwritten."}
+        except SourceRemovalError:
+            return {"success": False, "status": "partial",
+                    "message": "Destination published but source removal failed; both files may exist."}
+        if source.exists() or not dest.is_file():
             return {"success": False, "status": "verification_failed",
                     "message": "Rename returned but the destination was not found."}
         logger.info("Renamed %s to %s", source, dest)
