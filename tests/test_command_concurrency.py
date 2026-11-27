@@ -12,6 +12,8 @@ class CommandGateTests(unittest.TestCase):
         app = JarvisApp.__new__(JarvisApp)
         app._events = EventBus()
         app._command_gate = threading.BoundedSemaphore(1)
+        app._command_admission = threading.Lock()
+        app._command_cancel = threading.Event()
         results = []
         app._events.subscribe("command_result", results.append)
 
@@ -36,6 +38,8 @@ class CommandGateTests(unittest.TestCase):
         app = JarvisApp.__new__(JarvisApp)
         app._events = EventBus()
         app._command_gate = threading.BoundedSemaphore(1)
+        app._command_admission = threading.Lock()
+        app._command_cancel = threading.Event()
         self.assertTrue(app._command_gate.acquire(blocking=False))
         events = []
         app._events.subscribe("command_result", events.append)
@@ -43,6 +47,7 @@ class CommandGateTests(unittest.TestCase):
             app._handle_command({"text": "stop"})
         self.assertEqual(events[-1]["status"], "interrupt_requested")
         get.return_value.cancel_all.assert_called_once()
+        self.assertTrue(app._command_cancel.is_set())
         app._command_gate.release()
 
 
