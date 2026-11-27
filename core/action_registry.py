@@ -92,10 +92,15 @@ def _system_check_handler(target: str) -> Dict[str, Any]:
             errors="replace",
             timeout=45,
         )
-        # Parse for the "STATUS" line to give a clean message
-        status_line = [line for line in res.split('\n') if "STATUS:" in line]
-        msg = status_line[0] if status_line else "Diagnostic completed."
-        return {"success": True, "status": "success", "message": f"Sir, I have performed a full system check. {msg}", "output": res}
+        return {
+            "success": True,
+            "status": "diagnostic_report_generated",
+            "message": (
+                "Jarvis generated a non-invasive setup report. This does NOT "
+                "verify microphone, speakers, AI providers, or production readiness."
+            ),
+            "output": res,
+        }
     except Exception as e:
         return {"success": False, "status": "error", "message": f"Diagnostic failure: {e}"}
 
