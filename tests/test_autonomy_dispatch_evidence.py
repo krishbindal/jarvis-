@@ -71,6 +71,15 @@ class AutonomyOutcomeTests(unittest.TestCase):
             self.engine._check_schedules()
         mark.assert_called_once_with(3, status="skipped_active")
 
+    def test_compound_open_command_is_queued_not_passed_as_app_name(self):
+        events = []
+        self.bus.subscribe("command_received", events.append)
+        with patch("brain.autonomy_engine.execute_action") as executor:
+            result = self.engine._execute_safe_command("open chrome and search for laptops")
+        self.assertIsNone(result)
+        self.assertEqual(len(events), 1)
+        executor.assert_not_called()
+
     def test_unavailable_executor_dispatches_but_never_confirms(self):
         events = []
         self.bus.subscribe("command_received", events.append)
