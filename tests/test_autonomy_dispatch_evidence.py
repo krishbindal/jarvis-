@@ -63,7 +63,7 @@ class AutonomyOutcomeTests(unittest.TestCase):
         mark.assert_called_once_with(3, status="completed")
 
     def test_already_active_nonrecurring_task_is_skipped_not_completed(self):
-        self.context.current_app = "notepad.exe"
+        self.context.update_after_action("open_app", "notepad.exe", {}, {"success": True, "status": "success"})
         with (
             patch("brain.autonomy_engine.due_tasks", return_value=[scheduled_task(command="open notepad")]),
             patch("brain.autonomy_engine.mark_task_run") as mark,
